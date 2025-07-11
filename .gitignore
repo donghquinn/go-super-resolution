@@ -1,0 +1,8 @@
+.DS_Store
+*.onnx
+*.log
+.claude
+
+*.jpeg
+*.png
+*.jpg
