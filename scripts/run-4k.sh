@@ -1,1 +1,1 @@
- ./main -input sample.jpeg -output result_4k.jpeg -width 3840 -height 2160
+ ./main -input sample.jpeg -output result_4k.jpeg -mode mps -model models/Real-ESRGAN-x4plus.onnx -width 3840 -height 2160
