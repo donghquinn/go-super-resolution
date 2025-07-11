@@ -10,5 +10,8 @@
 *.jpeg
 *.png
 *.jpg
+
 sr-go
+sr-gui
+
 main
