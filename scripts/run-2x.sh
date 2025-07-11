@@ -1,0 +1,1 @@
+  ./main -input sample.jpeg -output result_2x.jpeg -scale 2

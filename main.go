@@ -36,17 +36,21 @@ type Config struct {
 	Mode        InferenceMode
 	Engine      UpscaleEngine
 	ScaleFactor int
+	TargetWidth int
+	TargetHeight int
 }
 
 func main() {
 	var (
-		inputPath   = flag.String("input", "", "Input image path")
-		outputPath  = flag.String("output", "", "Output image path")
-		modelPath   = flag.String("model", "models/Real-ESRGAN-x4plus.onnx", "Model path")
-		mode        = flag.String("mode", "cpu", "Inference mode: cpu, gpu, mps")
-		engine      = flag.String("engine", "opencv", "Upscale engine: opencv, onnx, tensorflow, tflite")
-		scaleFactor = flag.Int("scale", 4, "Scale factor (2x, 4x, etc.)")
-		help        = flag.Bool("help", false, "Show help")
+		inputPath    = flag.String("input", "", "Input image path")
+		outputPath   = flag.String("output", "", "Output image path")
+		modelPath    = flag.String("model", "models/Real-ESRGAN-x4plus.onnx", "Model path")
+		mode         = flag.String("mode", "cpu", "Inference mode: cpu, gpu, mps")
+		engine       = flag.String("engine", "opencv", "Upscale engine: opencv, onnx, tensorflow, tflite")
+		scaleFactor  = flag.Int("scale", 4, "Scale factor (2x, 4x, etc.)")
+		targetWidth  = flag.Int("width", 0, "Target width (0 = use scale factor)")
+		targetHeight = flag.Int("height", 0, "Target height (0 = use scale factor)")
+		help         = flag.Bool("help", false, "Show help")
 	)
 	flag.Parse()
 
@@ -72,13 +76,20 @@ func main() {
 		log.Fatalf("MPS mode is only available on macOS")
 	}
 
+	// Validate scaling options
+	if *targetWidth > 0 && *targetHeight > 0 && *scaleFactor != 4 {
+		log.Fatalf("Cannot specify both scale factor and target dimensions")
+	}
+
 	config := Config{
-		InputPath:   *inputPath,
-		OutputPath:  *outputPath,
-		ModelPath:   *modelPath,
-		Mode:        inferenceMode,
-		Engine:      upscaleEngine,
-		ScaleFactor: *scaleFactor,
+		InputPath:    *inputPath,
+		OutputPath:   *outputPath,
+		ModelPath:    *modelPath,
+		Mode:         inferenceMode,
+		Engine:       upscaleEngine,
+		ScaleFactor:  *scaleFactor,
+		TargetWidth:  *targetWidth,
+		TargetHeight: *targetHeight,
 	}
 
 	fmt.Printf("Super-Resolution Configuration:\n")
@@ -87,7 +98,11 @@ func main() {
 	fmt.Printf("  Model: %s\n", config.ModelPath)
 	fmt.Printf("  Engine: %s\n", config.Engine)
 	fmt.Printf("  Mode: %s\n", config.Mode)
-	fmt.Printf("  Scale: %dx\n", config.ScaleFactor)
+	if config.TargetWidth > 0 || config.TargetHeight > 0 {
+		fmt.Printf("  Target Size: %dx%d\n", config.TargetWidth, config.TargetHeight)
+	} else {
+		fmt.Printf("  Scale: %dx\n", config.ScaleFactor)
+	}
 	fmt.Printf("  Runtime: %s\n", runtime.GOOS)
 	fmt.Println()
 
@@ -119,6 +134,8 @@ func printUsage() {
 	fmt.Println("  -engine string   Upscale engine: opencv, onnx, tensorflow, tflite (default: opencv)")
 	fmt.Println("  -mode string     Inference mode: cpu, gpu, mps (default: cpu)")
 	fmt.Println("  -scale int       Scale factor (default: 4)")
+	fmt.Println("  -width int       Target width (0 = use scale factor)")
+	fmt.Println("  -height int      Target height (0 = use scale factor)")
 	fmt.Println("  -help           Show this help")
 	fmt.Println()
 	fmt.Println("Examples:")
@@ -126,6 +143,8 @@ func printUsage() {
 	fmt.Println("  main -input photo.jpg -output photo_4x.jpg -engine onnx -mode mps")
 	fmt.Println("  main -input photo.jpg -output photo_4x.jpg -engine tensorflow -mode gpu")
 	fmt.Println("  main -input photo.jpg -output photo_2x.jpg -scale 2")
+	fmt.Println("  main -input photo.jpg -output photo_hd.jpg -width 1920 -height 1080")
+	fmt.Println("  main -input photo.jpg -output photo_4k.jpg -width 3840 -height 2160")
 	fmt.Println()
 	fmt.Println("Engines:")
 	fmt.Println("  opencv      Simple OpenCV upscaling (no AI model)")
@@ -236,7 +255,32 @@ func (p *SuperResolutionProcessor) ProcessImage() error {
 func (p *SuperResolutionProcessor) processWithOpenCV(img gocv.Mat) gocv.Mat {
 	fmt.Printf("Processing with OpenCV engine (%s mode)\n", p.config.Mode)
 	
-	newSize := image.Pt(img.Cols()*p.config.ScaleFactor, img.Rows()*p.config.ScaleFactor)
+	// Calculate target size
+	var newSize image.Point
+	if p.config.TargetWidth > 0 || p.config.TargetHeight > 0 {
+		// Use specific dimensions
+		width := p.config.TargetWidth
+		height := p.config.TargetHeight
+		
+		// If only one dimension is specified, calculate the other maintaining aspect ratio
+		if width == 0 {
+			aspectRatio := float64(img.Cols()) / float64(img.Rows())
+			width = int(float64(height) * aspectRatio)
+		}
+		if height == 0 {
+			aspectRatio := float64(img.Rows()) / float64(img.Cols())
+			height = int(float64(width) * aspectRatio)
+		}
+		
+		newSize = image.Pt(width, height)
+		fmt.Printf("Target size: %dx%d\n", width, height)
+	} else {
+		// Use scale factor
+		newSize = image.Pt(img.Cols()*p.config.ScaleFactor, img.Rows()*p.config.ScaleFactor)
+		fmt.Printf("Scale factor: %dx (from %dx%d to %dx%d)\n", 
+			p.config.ScaleFactor, img.Cols(), img.Rows(), newSize.X, newSize.Y)
+	}
+	
 	result := gocv.NewMat()
 	
 	// Use different interpolation based on mode
@@ -318,8 +362,31 @@ func (p *SuperResolutionProcessor) processWithTFLite(img gocv.Mat) (gocv.Mat, er
 	fmt.Println("⚠️  TensorFlow Lite inference simulation")
 	fmt.Printf("Model: %s\n", p.config.ModelPath)
 	
-	// Simple upscaling as placeholder
-	newSize := image.Pt(img.Cols()*p.config.ScaleFactor, img.Rows()*p.config.ScaleFactor)
+	// Calculate target size
+	var newSize image.Point
+	if p.config.TargetWidth > 0 || p.config.TargetHeight > 0 {
+		// Use specific dimensions
+		width := p.config.TargetWidth
+		height := p.config.TargetHeight
+		
+		// If only one dimension is specified, calculate the other maintaining aspect ratio
+		if width == 0 {
+			aspectRatio := float64(img.Cols()) / float64(img.Rows())
+			width = int(float64(height) * aspectRatio)
+		}
+		if height == 0 {
+			aspectRatio := float64(img.Rows()) / float64(img.Cols())
+			height = int(float64(width) * aspectRatio)
+		}
+		
+		newSize = image.Pt(width, height)
+		fmt.Printf("Target size: %dx%d\n", width, height)
+	} else {
+		// Use scale factor
+		newSize = image.Pt(img.Cols()*p.config.ScaleFactor, img.Rows()*p.config.ScaleFactor)
+		fmt.Printf("Scale factor: %dx\n", p.config.ScaleFactor)
+	}
+	
 	result := gocv.NewMat()
 	
 	// Use different interpolation based on mode
@@ -517,11 +584,33 @@ func (e *TensorFlowEngine) runInference(inputTensor gocv.Mat) (gocv.Mat, error) 
 		fmt.Println("⚠️  MPS inference simulation")
 	}
 
-	// Simple upscaling simulation
-	newSize := image.Pt(
-		inputTensor.Cols()*e.config.ScaleFactor, 
-		inputTensor.Rows()*e.config.ScaleFactor,
-	)
+	// Calculate target size
+	var newSize image.Point
+	if e.config.TargetWidth > 0 || e.config.TargetHeight > 0 {
+		// Use specific dimensions
+		width := e.config.TargetWidth
+		height := e.config.TargetHeight
+		
+		// If only one dimension is specified, calculate the other maintaining aspect ratio
+		if width == 0 {
+			aspectRatio := float64(inputTensor.Cols()) / float64(inputTensor.Rows())
+			width = int(float64(height) * aspectRatio)
+		}
+		if height == 0 {
+			aspectRatio := float64(inputTensor.Rows()) / float64(inputTensor.Cols())
+			height = int(float64(width) * aspectRatio)
+		}
+		
+		newSize = image.Pt(width, height)
+		fmt.Printf("Target size: %dx%d\n", width, height)
+	} else {
+		// Use scale factor
+		newSize = image.Pt(
+			inputTensor.Cols()*e.config.ScaleFactor, 
+			inputTensor.Rows()*e.config.ScaleFactor,
+		)
+		fmt.Printf("Scale factor: %dx\n", e.config.ScaleFactor)
+	}
 	
 	result := gocv.NewMat()
 	gocv.Resize(inputTensor, &result, newSize, 0, 0, gocv.InterpolationCubic)

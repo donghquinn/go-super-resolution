@@ -1,0 +1,1 @@
+ ./main -input sample.jpeg -output result_4k.jpeg -width 3840 -height 2160

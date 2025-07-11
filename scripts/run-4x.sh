@@ -1,0 +1,1 @@
+  ./main -input sample.jpeg -output result_4x.jpeg -scale 4
