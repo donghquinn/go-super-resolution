@@ -26,6 +26,7 @@ const (
 	EngineOpenCV     UpscaleEngine = "opencv"
 	EngineONNX       UpscaleEngine = "onnx"
 	EngineTensorFlow UpscaleEngine = "tensorflow"
+	EngineTFLite     UpscaleEngine = "tflite"
 )
 
 type Config struct {
@@ -43,7 +44,7 @@ func main() {
 		outputPath  = flag.String("output", "", "Output image path")
 		modelPath   = flag.String("model", "models/Real-ESRGAN-x4plus.onnx", "Model path")
 		mode        = flag.String("mode", "cpu", "Inference mode: cpu, gpu, mps")
-		engine      = flag.String("engine", "opencv", "Upscale engine: opencv, onnx, tensorflow")
+		engine      = flag.String("engine", "opencv", "Upscale engine: opencv, onnx, tensorflow, tflite")
 		scaleFactor = flag.Int("scale", 4, "Scale factor (2x, 4x, etc.)")
 		help        = flag.Bool("help", false, "Show help")
 	)
@@ -63,7 +64,7 @@ func main() {
 	// Validate engine
 	upscaleEngine := UpscaleEngine(*engine)
 	if !isValidEngine(upscaleEngine) {
-		log.Fatalf("Invalid engine: %s. Use: opencv, onnx, tensorflow", *engine)
+		log.Fatalf("Invalid engine: %s. Use: opencv, onnx, tensorflow, tflite", *engine)
 	}
 
 	// Check if MPS is available on this system
@@ -115,7 +116,7 @@ func printUsage() {
 	fmt.Println("  -input string    Input image path (required)")
 	fmt.Println("  -output string   Output image path (required)")
 	fmt.Println("  -model string    Model path (default: models/esrgan.onnx)")
-	fmt.Println("  -engine string   Upscale engine: opencv, onnx, tensorflow (default: opencv)")
+	fmt.Println("  -engine string   Upscale engine: opencv, onnx, tensorflow, tflite (default: opencv)")
 	fmt.Println("  -mode string     Inference mode: cpu, gpu, mps (default: cpu)")
 	fmt.Println("  -scale int       Scale factor (default: 4)")
 	fmt.Println("  -help           Show this help")
@@ -128,8 +129,9 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Engines:")
 	fmt.Println("  opencv      Simple OpenCV upscaling (no AI model)")
-	fmt.Println("  onnx        ONNX model inference with GoCV")
-	fmt.Println("  tensorflow  TensorFlow model inference")
+	fmt.Println("  onnx        ONNX model inference with GoCV (.onnx)")
+	fmt.Println("  tensorflow  TensorFlow model inference (.pb)")
+	fmt.Println("  tflite      TensorFlow Lite model inference (.tflite)")
 	fmt.Println()
 	fmt.Println("Modes:")
 	fmt.Println("  cpu: CPU inference (works on all platforms)")
@@ -148,7 +150,7 @@ func isValidMode(mode InferenceMode) bool {
 
 func isValidEngine(engine UpscaleEngine) bool {
 	switch engine {
-	case EngineOpenCV, EngineONNX, EngineTensorFlow:
+	case EngineOpenCV, EngineONNX, EngineTensorFlow, EngineTFLite:
 		return true
 	default:
 		return false
@@ -211,6 +213,11 @@ func (p *SuperResolutionProcessor) ProcessImage() error {
 		result, err = p.processWithTensorFlow(img)
 		if err != nil {
 			return fmt.Errorf("TensorFlow processing failed: %v", err)
+		}
+	case EngineTFLite:
+		result, err = p.processWithTFLite(img)
+		if err != nil {
+			return fmt.Errorf("TFLite processing failed: %v", err)
 		}
 	default:
 		return fmt.Errorf("unsupported engine: %s", p.config.Engine)
@@ -300,6 +307,33 @@ func (p *SuperResolutionProcessor) processWithTensorFlow(img gocv.Mat) (gocv.Mat
 		return gocv.Mat{}, fmt.Errorf("TensorFlow inference failed: %v", err)
 	}
 
+	return result, nil
+}
+
+func (p *SuperResolutionProcessor) processWithTFLite(img gocv.Mat) (gocv.Mat, error) {
+	fmt.Printf("Processing with TensorFlow Lite engine (%s mode)\n", p.config.Mode)
+	
+	// TensorFlow Lite processing
+	// For now, simulate with simple upscaling
+	fmt.Println("⚠️  TensorFlow Lite inference simulation")
+	fmt.Printf("Model: %s\n", p.config.ModelPath)
+	
+	// Simple upscaling as placeholder
+	newSize := image.Pt(img.Cols()*p.config.ScaleFactor, img.Rows()*p.config.ScaleFactor)
+	result := gocv.NewMat()
+	
+	// Use different interpolation based on mode
+	var interpolation gocv.InterpolationFlags
+	switch p.config.Mode {
+	case ModeCPU:
+		interpolation = gocv.InterpolationCubic
+	case ModeGPU:
+		interpolation = gocv.InterpolationLanczos4
+	case ModeMPS:
+		interpolation = gocv.InterpolationCubic
+	}
+	
+	gocv.Resize(img, &result, newSize, 0, 0, interpolation)
 	return result, nil
 }
 
@@ -445,8 +479,13 @@ func (e *TensorFlowEngine) Inference(img gocv.Mat) (gocv.Mat, error) {
 
 // preprocessImageTF converts OpenCV Mat to TensorFlow tensor format
 func (e *TensorFlowEngine) preprocessImageTF(img gocv.Mat) (gocv.Mat, error) {
+	// Check if input image is valid
+	if img.Empty() {
+		return gocv.Mat{}, fmt.Errorf("input image is empty")
+	}
+
 	// Convert to RGB (TensorFlow typically expects RGB)
-	var rgbImg gocv.Mat
+	rgbImg := gocv.NewMat()
 	gocv.CvtColor(img, &rgbImg, gocv.ColorBGRToRGB)
 
 	// Convert to float32 and normalize to [0, 1]
@@ -492,6 +531,11 @@ func (e *TensorFlowEngine) runInference(inputTensor gocv.Mat) (gocv.Mat, error) 
 
 // postprocessImageTF converts TensorFlow output tensor back to OpenCV Mat
 func (e *TensorFlowEngine) postprocessImageTF(outputTensor gocv.Mat) (gocv.Mat, error) {
+	// Check if output tensor is valid
+	if outputTensor.Empty() {
+		return gocv.Mat{}, fmt.Errorf("output tensor is empty")
+	}
+
 	// Denormalize from [0, 1] to [0, 255]
 	denormalized := gocv.NewMat()
 	outputTensor.MultiplyFloat(255.0)

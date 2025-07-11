@@ -1,1 +1,1 @@
-main -input sample.jpeg -output result_tesnsor.jpeg -engine tensorflow -mode mps
+./main -input sample.jpeg -output result_tesnsor.jpeg -engine tflite -mode mps -model models/RealESRGAN_x8.pth
