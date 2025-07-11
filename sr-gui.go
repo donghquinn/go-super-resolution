@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -47,7 +48,7 @@ type GUI struct {
 }
 
 func NewGUI() *GUI {
-	myApp := app.New()
+	myApp := app.NewWithID("com.example.super-resolution")
 	myApp.SetIcon(theme.DocumentCreateIcon())
 	
 	myWindow := myApp.NewWindow("Super Resolution - AI Image Upscaler")
@@ -236,43 +237,58 @@ func (gui *GUI) onProcessImage() {
 		return
 	}
 	
-	go gui.processImageAsync()
+	// Start processing
+	gui.processImageAsync()
 }
 
 func (gui *GUI) processImageAsync() {
+	// Set initial state
 	gui.isProcessing = true
 	gui.processButton.Disable()
 	gui.statusLabel.SetText("Processing...")
 	gui.progressBar.Show()
 	gui.progressBar.SetValue(0.3)
 	
+	// Create config
 	config := gui.createConfig()
 	
-	processor, err := NewSuperResolutionProcessor(config)
-	if err != nil {
-		gui.showError(fmt.Errorf("failed to create processor: %v", err))
-		gui.finishProcessing()
-		return
-	}
-	defer processor.Close()
-	
-	gui.progressBar.SetValue(0.6)
-	
-	err = processor.ProcessImage()
-	if err != nil {
-		gui.showError(fmt.Errorf("failed to process image: %v", err))
-		gui.finishProcessing()
-		return
-	}
-	
-	gui.progressBar.SetValue(0.9)
-	gui.currentResultPath = config.OutputPath
-	gui.loadResultImage(config.OutputPath)
-	
-	gui.progressBar.SetValue(1.0)
-	gui.statusLabel.SetText("Processing completed successfully!")
-	gui.saveButton.Enable()
-	gui.finishProcessing()
+	// Start background processing
+	go func() {
+		// Create processor
+		processor, err := NewSuperResolutionProcessor(config)
+		if err != nil {
+			// Schedule UI update
+			time.AfterFunc(1*time.Millisecond, func() {
+				gui.app.SendNotification(fyne.NewNotification("Error", fmt.Sprintf("Failed to create processor: %v", err)))
+				gui.statusLabel.SetText("Processing failed")
+				gui.finishProcessing()
+			})
+			return
+		}
+		defer processor.Close()
+		
+		// Process the image
+		err = processor.ProcessImage()
+		if err != nil {
+			// Schedule UI update
+			time.AfterFunc(1*time.Millisecond, func() {
+				gui.app.SendNotification(fyne.NewNotification("Error", fmt.Sprintf("Processing failed: %v", err)))
+				gui.statusLabel.SetText("Processing failed")
+				gui.finishProcessing()
+			})
+			return
+		}
+		
+		// Schedule successful completion UI update
+		time.AfterFunc(1*time.Millisecond, func() {
+			gui.currentResultPath = config.OutputPath
+			gui.loadResultImage(config.OutputPath)
+			gui.progressBar.SetValue(1.0)
+			gui.statusLabel.SetText("Processing completed successfully!")
+			gui.saveButton.Enable()
+			gui.finishProcessing()
+		})
+	}()
 }
 
 func (gui *GUI) finishProcessing() {
