@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"log"
 	"os"
 	"path/filepath"
@@ -41,9 +42,12 @@ func NewSuperResolution() *SuperResolution {
 		log.Fatalf("Failed to load ONNX model from %s", modelPath)
 	}
 
-	// Set backend (try CUDA first, fallback to CPU)
+	// Set backend and target
+	// For Mac, try different backends in order of preference
 	net.SetPreferableBackend(gocv.NetBackendOpenCV)
 	net.SetPreferableTarget(gocv.NetTargetCPU)
+	
+	fmt.Println("Using CPU backend for inference")
 
 	return &SuperResolution{net: net}
 }
@@ -88,12 +92,13 @@ func (sr *SuperResolution) ProcessImage(inputPath, outputPath string) error {
 
 func (sr *SuperResolution) preprocessImage(img gocv.Mat) gocv.Mat {
 	// Convert to float32 and normalize to [0, 1]
-	var imgFloat gocv.Mat
+	imgFloat := gocv.NewMat()
 	img.ConvertTo(&imgFloat, gocv.MatTypeCV32F)
 	imgFloat.DivideFloat(255.0)
 
 	// Create blob from image (NCHW format)
-	blob := gocv.BlobFromImage(imgFloat, 1.0, img.Size(), gocv.NewScalar(0, 0, 0, 0), true, false, gocv.MatTypeCV32F)
+	size := img.Size()
+	blob := gocv.BlobFromImage(imgFloat, 1.0, image.Pt(size[1], size[0]), gocv.NewScalar(0, 0, 0, 0), true, false)
 	
 	imgFloat.Close()
 	return blob
@@ -114,7 +119,7 @@ func (sr *SuperResolution) postprocessImage(output gocv.Mat) gocv.Mat {
 	height := size[2]
 	width := size[3]
 	
-	reshaped := output.Reshape(1, []int{channels, height, width})
+	reshaped := output.Reshape(1, channels*height*width)
 	defer reshaped.Close()
 
 	// Convert CHW to HWC
