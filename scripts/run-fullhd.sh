@@ -1,0 +1,1 @@
+  ./main -input sample.jpeg -output result_hd.jpeg -width 1920 -height 1080
