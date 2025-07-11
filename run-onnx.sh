@@ -1,0 +1,1 @@
+./main -input sample.jpeg -output result.jpeg -engine onnx -mode mps -model models/Real-ESRGAN-x4plus.onnx
