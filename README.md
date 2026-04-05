@@ -31,13 +31,34 @@ A cross-platform GUI application for AI-powered image super-resolution. Enhance 
 
 ## Quick Start
 
-```bash
-# Build
-go build -o sr-gui .
+### 1. Get a model
 
-# Run
+**Option A — generate a demo ONNX model** (requires Python + PyTorch):
+```bash
+pip install torch torchvision
+python download_model.py
+# → creates models/esrgan.onnx (simple demo model)
+```
+
+**Option B — download a real pre-trained model**:
+```bash
+mkdir -p models
+# Real-ESRGAN 4x (recommended)
+curl -L -o models/Real-ESRGAN-x4plus.onnx \
+  https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.pth
+# (convert .pth → .onnx using download_model.py as a reference)
+```
+
+Or browse pre-converted ONNX models at https://github.com/onnx/models
+
+### 2. Build and run
+
+```bash
+go build -o sr-gui .
 ./sr-gui
 ```
+
+### 3. Use the GUI
 
 1. **Select Image** — drag & drop or click Browse Files
 2. **Configure Settings** — engine, mode, scale, and model path
