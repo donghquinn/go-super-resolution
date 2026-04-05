@@ -12,7 +12,10 @@ import (
 )
 
 type SuperResolutionProcessor struct {
-	config Config
+	config    Config
+	net       gocv.Net          // cached ONNX net; valid when netLoaded == true
+	netLoaded bool
+	tfEngine  *TensorFlowEngine // cached TF engine; valid when non-nil
 }
 
 func NewSuperResolutionProcessor(config Config) (*SuperResolutionProcessor, error) {
@@ -31,6 +34,36 @@ func NewSuperResolutionProcessor(config Config) (*SuperResolutionProcessor, erro
 	}
 
 	processor := &SuperResolutionProcessor{config: config}
+
+	// Load engine once so ProcessImage() pays no model-loading cost.
+	switch config.Engine {
+	case EngineONNX:
+		net := gocv.ReadNetFromONNX(config.ModelPath)
+		if net.Empty() {
+			return nil, fmt.Errorf("failed to load ONNX model: %s", config.ModelPath)
+		}
+		switch config.Mode {
+		case ModeCPU:
+			net.SetPreferableBackend(gocv.NetBackendOpenCV)
+			net.SetPreferableTarget(gocv.NetTargetCPU)
+		case ModeGPU:
+			net.SetPreferableBackend(gocv.NetBackendCUDA)
+			net.SetPreferableTarget(gocv.NetTargetCUDA)
+		case ModeMPS:
+			net.SetPreferableBackend(gocv.NetBackendOpenCV)
+			net.SetPreferableTarget(gocv.NetTargetCPU) // MPS not directly supported
+		}
+		processor.net = net
+		processor.netLoaded = true
+
+	case EngineTensorFlow:
+		engine, err := NewTensorFlowEngine(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create TensorFlow engine: %v", err)
+		}
+		processor.tfEngine = engine
+	}
+
 	fmt.Printf("✓ Processor initialized with %s engine in %s mode\n", config.Engine, config.Mode)
 	return processor, nil
 }
@@ -108,29 +141,11 @@ func (p *SuperResolutionProcessor) processWithOpenCV(img gocv.Mat) gocv.Mat {
 func (p *SuperResolutionProcessor) processWithONNX(img gocv.Mat) (gocv.Mat, error) {
 	fmt.Printf("Processing with ONNX engine (%s mode)\n", p.config.Mode)
 
-	net := gocv.ReadNetFromONNX(p.config.ModelPath)
-	if net.Empty() {
-		return gocv.Mat{}, fmt.Errorf("failed to load ONNX model: %s", p.config.ModelPath)
-	}
-	defer net.Close()
-
-	switch p.config.Mode {
-	case ModeCPU:
-		net.SetPreferableBackend(gocv.NetBackendOpenCV)
-		net.SetPreferableTarget(gocv.NetTargetCPU)
-	case ModeGPU:
-		net.SetPreferableBackend(gocv.NetBackendCUDA)
-		net.SetPreferableTarget(gocv.NetTargetCUDA)
-	case ModeMPS:
-		net.SetPreferableBackend(gocv.NetBackendOpenCV)
-		net.SetPreferableTarget(gocv.NetTargetCPU) // MPS not directly supported
-	}
-
 	blob := p.preprocessImage(img)
 	defer blob.Close()
 
-	net.SetInput(blob, "")
-	output := net.Forward("")
+	p.net.SetInput(blob, "")
+	output := p.net.Forward("")
 	defer output.Close()
 
 	result := p.postprocessImage(output)
@@ -140,13 +155,7 @@ func (p *SuperResolutionProcessor) processWithONNX(img gocv.Mat) (gocv.Mat, erro
 func (p *SuperResolutionProcessor) processWithTensorFlow(img gocv.Mat) (gocv.Mat, error) {
 	fmt.Printf("Processing with TensorFlow engine (%s mode)\n", p.config.Mode)
 
-	engine, err := NewTensorFlowEngine(p.config)
-	if err != nil {
-		return gocv.Mat{}, fmt.Errorf("failed to create TensorFlow engine: %v", err)
-	}
-	defer engine.Close()
-
-	result, err := engine.Inference(img)
+	result, err := p.tfEngine.Inference(img)
 	if err != nil {
 		return gocv.Mat{}, fmt.Errorf("TensorFlow inference failed: %v", err)
 	}
@@ -206,17 +215,10 @@ func (p *SuperResolutionProcessor) calculateTargetSize(img gocv.Mat) image.Point
 }
 
 func (p *SuperResolutionProcessor) preprocessImage(img gocv.Mat) gocv.Mat {
-	// Convert to float32 and normalize to [0, 1]
-	imgFloat := gocv.NewMat()
-	img.ConvertTo(&imgFloat, gocv.MatTypeCV32F)
-	imgFloat.DivideFloat(255.0)
-
-	// Create blob from image (NCHW format)
+	// BlobFromImage handles float32 conversion and [0,1] normalization in a
+	// single pass via its scalefactor argument, avoiding an intermediate Mat.
 	size := img.Size()
-	blob := gocv.BlobFromImage(imgFloat, 1.0, image.Pt(size[1], size[0]), gocv.NewScalar(0, 0, 0, 0), true, false)
-
-	imgFloat.Close()
-	return blob
+	return gocv.BlobFromImage(img, 1.0/255.0, image.Pt(size[1], size[0]), gocv.NewScalar(0, 0, 0, 0), true, false)
 }
 
 func (p *SuperResolutionProcessor) postprocessImage(output gocv.Mat) gocv.Mat {
@@ -251,7 +253,16 @@ func (p *SuperResolutionProcessor) postprocessImage(output gocv.Mat) gocv.Mat {
 	return result
 }
 
-func (p *SuperResolutionProcessor) Close() {}
+func (p *SuperResolutionProcessor) Close() {
+	if p.netLoaded {
+		p.net.Close()
+		p.netLoaded = false
+	}
+	if p.tfEngine != nil {
+		p.tfEngine.Close()
+		p.tfEngine = nil
+	}
+}
 
 func detectImageFormat(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
