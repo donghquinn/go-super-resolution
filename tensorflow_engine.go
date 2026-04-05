@@ -110,10 +110,9 @@ func (e *TensorFlowEngine) preprocessImage(img gocv.Mat) (gocv.Mat, error) {
 func (e *TensorFlowEngine) runInference(inputTensor gocv.Mat) (gocv.Mat, error) {
 	// This is where the actual TensorFlow inference would happen
 	// For now, we'll simulate it with a simple upscaling operation
-	
-	fmt.Printf("Running inference with %s backend...\n", e.config.Mode)
-	
-	// Simulate different processing times based on mode
+
+	fmt.Printf("Running TensorFlow inference with %s backend...\n", e.config.Mode)
+
 	switch e.config.Mode {
 	case ModeCPU:
 		fmt.Println("⚠️  CPU inference simulation")
@@ -123,15 +122,33 @@ func (e *TensorFlowEngine) runInference(inputTensor gocv.Mat) (gocv.Mat, error) 
 		fmt.Println("⚠️  MPS inference simulation")
 	}
 
-	// Simple upscaling simulation
-	newSize := image.Pt(
-		inputTensor.Cols()*e.config.ScaleFactor, 
-		inputTensor.Rows()*e.config.ScaleFactor,
-	)
-	
+	var newSize image.Point
+	if e.config.TargetWidth > 0 || e.config.TargetHeight > 0 {
+		width := e.config.TargetWidth
+		height := e.config.TargetHeight
+
+		if width == 0 {
+			aspectRatio := float64(inputTensor.Cols()) / float64(inputTensor.Rows())
+			width = int(float64(height) * aspectRatio)
+		}
+		if height == 0 {
+			aspectRatio := float64(inputTensor.Rows()) / float64(inputTensor.Cols())
+			height = int(float64(width) * aspectRatio)
+		}
+
+		newSize = image.Pt(width, height)
+		fmt.Printf("Target size: %dx%d\n", width, height)
+	} else {
+		newSize = image.Pt(
+			inputTensor.Cols()*e.config.ScaleFactor,
+			inputTensor.Rows()*e.config.ScaleFactor,
+		)
+		fmt.Printf("Scale factor: %dx\n", e.config.ScaleFactor)
+	}
+
 	result := gocv.NewMat()
 	gocv.Resize(inputTensor, &result, newSize, 0, 0, gocv.InterpolationCubic)
-	
+
 	return result, nil
 }
 
