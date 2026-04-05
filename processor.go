@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unsafe"
 
 	"gocv.io/x/gocv"
 )
@@ -39,7 +40,19 @@ func NewSuperResolutionProcessor(config Config) (*SuperResolutionProcessor, erro
 	switch config.Engine {
 	case EngineONNX:
 		net := gocv.ReadNetFromONNX(config.ModelPath)
+		// GoCV v0.41.0 bug: when the ONNX parser hits an unsupported node it
+		// throws a C++ exception; the C wrapper catches it and returns a null
+		// pointer. Calling net.Empty() on a null C pointer segfaults inside
+		// cgo. We read the raw pointer first and return a clean error instead.
+		if *(*uintptr)(unsafe.Pointer(&net)) == 0 {
+			return nil, fmt.Errorf(
+				"ONNX model could not be parsed: %s\n"+
+					"The model likely contains operators unsupported by this OpenCV build.\n"+
+					"Delete the old model and regenerate: uv run --with torch,torchvision download_model.py",
+				config.ModelPath)
+		}
 		if net.Empty() {
+			net.Close()
 			return nil, fmt.Errorf("failed to load ONNX model: %s", config.ModelPath)
 		}
 		switch config.Mode {
