@@ -35,7 +35,7 @@ A cross-platform GUI application for AI-powered image super-resolution. Enhance 
 
 **Option A — generate a demo ONNX model** (requires Python + [uv](https://github.com/astral-sh/uv)):
 ```bash
-uv run --with torch,torchvision,onnxscript download_model.py
+uv run --with torch,torchvision download_model.py
 # → creates models/esrgan.onnx (simple demo model)
 ```
 

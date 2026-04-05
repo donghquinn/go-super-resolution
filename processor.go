@@ -148,6 +148,11 @@ func (p *SuperResolutionProcessor) processWithONNX(img gocv.Mat) (gocv.Mat, erro
 	output := p.net.Forward("")
 	defer output.Close()
 
+	if output.Empty() {
+		return gocv.Mat{}, fmt.Errorf("ONNX forward pass returned empty output — " +
+			"model may contain unsupported operators for this OpenCV DNN version")
+	}
+
 	result := p.postprocessImage(output)
 	return result, nil
 }
