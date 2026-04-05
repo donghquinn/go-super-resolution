@@ -1,176 +1,93 @@
-# Super-Resolution Go Application (TensorFlow)
+# TensorFlow Engine
 
-A Go implementation of image super-resolution with TensorFlow backend and mode selection.
+> **Note**: The TensorFlow engine is part of the main application. See [README.md](README.md) for build and usage instructions.
 
-## Features
+`tensorflow_engine.go` implements the `TensorFlowEngine` struct used when the **TensorFlow** engine is selected in the GUI.
 
-- **Multiple Inference Modes**:
-  - `cpu`: CPU inference (works on all platforms)
-  - `gpu`: GPU inference (CUDA required)
-  - `mps`: Metal Performance Shaders (macOS only)
-- **TensorFlow Backend**: Uses TensorFlow Go API
-- **Flexible Scale Factors**: 2x, 4x, 8x upscaling
-- **Command Line Interface**: Easy to use CLI with options
+## Pipeline
 
-## Prerequisites
-
-1. **Install OpenCV**:
-   ```bash
-   # macOS
-   brew install opencv pkg-config
-   
-   # Ubuntu/Debian
-   sudo apt-get install libopencv-dev pkg-config
-   ```
-
-2. **Install TensorFlow C Library**:
-   ```bash
-   # macOS
-   brew install tensorflow
-   
-   # Ubuntu/Debian
-   # Follow TensorFlow C installation guide
-   ```
-
-## Installation
-
-1. **Clone and build**:
-   ```bash
-   go mod tidy
-   go build -o sr-go main_tf.go tensorflow_engine.go
-   ```
-
-## Usage
-
-### Basic Usage
-```bash
-./sr-go -input photo.jpg -output photo_4x.jpg
+```
+Input image (BGR Mat)
+    │
+    ▼
+preprocessImage()       — BGR → RGB, float32, normalize [0,1]
+    │
+    ▼
+runInference()          — upscale via Resize (simulated; replace with real TF session)
+    │
+    ▼
+postprocessImage()      — denormalize [0,255], uint8, RGB → BGR
+    │
+    ▼
+Output image (BGR Mat)
 ```
 
-### Mode Selection
-```bash
-# CPU mode (default)
-./sr-go -input photo.jpg -output photo_4x.jpg -mode cpu
+## Struct
 
-# GPU mode (requires CUDA)
-./sr-go -input photo.jpg -output photo_4x.jpg -mode gpu
-
-# MPS mode (macOS only)
-./sr-go -input photo.jpg -output photo_4x.jpg -mode mps
+```go
+type TensorFlowEngine struct {
+    config      Config   // ScaleFactor, TargetWidth/Height, Mode, ModelPath
+    inputName   string   // default: "input"
+    outputName  string   // default: "output"
+    initialized bool
+}
 ```
 
-### Scale Factor
-```bash
-# 2x upscaling
-./sr-go -input photo.jpg -output photo_2x.jpg -scale 2
+## Key Methods
 
-# 4x upscaling (default)
-./sr-go -input photo.jpg -output photo_4x.jpg -scale 4
-```
+| Method | Description |
+|--------|-------------|
+| `NewTensorFlowEngine(config)` | Creates and initializes the engine |
+| `Inference(img)` | Full preprocess → infer → postprocess pipeline |
+| `GetModelInfo()` | Returns metadata map |
+| `ValidateModel()` | Placeholder model validation |
+| `Close()` | Cleanup |
 
-### Custom Model
-```bash
-./sr-go -input photo.jpg -output photo_4x.jpg -model models/custom_esrgan.pb
-```
+## Inference Modes
 
-### All Options
-```bash
-./sr-go -input photo.jpg -output photo_4x.jpg -mode mps -scale 4 -model models/esrgan.pb
-```
+| Mode | Backend |
+|------|---------|
+| `cpu` | CPU session |
+| `gpu` | CUDA |
+| `mps` | Metal Performance Shaders (macOS) |
 
-## Command Line Options
+## Development Status
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-input` | Input image path (required) | - |
-| `-output` | Output image path (required) | - |
-| `-mode` | Inference mode: cpu, gpu, mps | cpu |
-| `-scale` | Scale factor (2, 4, 8) | 4 |
-| `-model` | TensorFlow model path (.pb) | models/esrgan.pb |
-| `-help` | Show help message | - |
+- ✅ Engine structure and pipeline
+- ✅ Image preprocessing / postprocessing
+- ✅ TargetWidth/TargetHeight and ScaleFactor support
+- ⚠️ Inference is currently simulated with `gocv.Resize`
+- ⚠️ Actual TF session / model loading not yet implemented
+
+## Implementing Real Inference
+
+Replace the body of `runInference()` in `tensorflow_engine.go` with:
+
+1. Load the `.pb` model using the TensorFlow Go API
+2. Create a session with CPU/GPU/MPS configuration
+3. Feed the preprocessed `Mat` as an input tensor
+4. Run the session and retrieve the output tensor
+5. Return the output tensor as a `gocv.Mat`
 
 ## Model Format
 
-The application expects TensorFlow models in `.pb` (protobuf) format. To convert other formats:
+Expects TensorFlow SavedModel in `.pb` (protobuf) format.
 
-### From PyTorch to TensorFlow
-```python
-import torch
-import tensorflow as tf
-
-# Load PyTorch model
-model = torch.load('esrgan.pth')
-
-# Convert to TensorFlow
-# ... conversion code ...
-
-# Save as .pb file
-tf.saved_model.save(model, 'models/esrgan.pb')
-```
-
-### From ONNX to TensorFlow
+### ONNX → TensorFlow
 ```python
 import onnx
 import onnx_tf
 
-# Load ONNX model
 onnx_model = onnx.load('esrgan.onnx')
-
-# Convert to TensorFlow
 tf_model = onnx_tf.backend.prepare(onnx_model)
-
-# Save as .pb file
 tf_model.export_graph('models/esrgan.pb')
 ```
 
-## Performance Comparison
+### PyTorch → TensorFlow
+```python
+import torch
+import tensorflow as tf
 
-| Mode | Platform | Relative Speed | GPU Memory |
-|------|----------|----------------|------------|
-| CPU | All | 1x | 0 |
-| GPU | CUDA | 3-5x | High |
-| MPS | macOS | 2-3x | Shared |
-
-## Architecture
-
-```
-main_tf.go              # Main application and CLI
-tensorflow_engine.go    # TensorFlow inference engine
-├── Config             # Configuration structure
-├── SuperResolutionProcessor # Main processor
-└── TensorFlowEngine   # TensorFlow backend
-```
-
-## Development Status
-
-- ✅ CLI with mode selection
-- ✅ Basic TensorFlow engine structure
-- ✅ Image preprocessing/postprocessing
-- ⚠️ TensorFlow inference (currently simulated)
-- ⚠️ Model loading (placeholder)
-- ⚠️ GPU/MPS acceleration (preparation done)
-
-## Next Steps
-
-1. Implement actual TensorFlow Go API integration
-2. Add real model loading from .pb files
-3. Implement GPU session configuration
-4. Add MPS backend support
-5. Performance optimization
-6. Add more model formats support
-
-## Troubleshooting
-
-### Common Issues
-
-1. **TensorFlow not found**: Install TensorFlow C library
-2. **MPS not available**: Only works on macOS with Metal support
-3. **Model file not found**: Check model path and format
-4. **CUDA not available**: Install CUDA toolkit for GPU mode
-
-### Debug Mode
-```bash
-# Add verbose logging
-export TF_CPP_MIN_LOG_LEVEL=0
-./sr-go -input photo.jpg -output photo_4x.jpg -mode gpu
+# ... conversion via ONNX as intermediate format
+tf.saved_model.save(converted_model, 'models/esrgan.pb')
 ```
