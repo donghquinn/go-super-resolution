@@ -19,14 +19,29 @@
 
     <section class="card">
       <h2>Settings</h2>
-      <label class="row">Engine
-        <select id="engine">
-          <option value="onnx" selected>onnx</option>
-          <option value="opencv">opencv</option>
-          <option value="tensorflow">tensorflow</option>
-          <option value="tflite">tflite</option>
-        </select>
-      </label>
+      <div id="model-section">
+        <div class="row">
+          <label for="model-select">Model</label>
+          <span class="model-picker">
+            <select id="model-select">
+              <optgroup label="Other">
+                <option value="resize">Basic resize (no AI)</option>
+                <option value="custom">Custom file…</option>
+              </optgroup>
+            </select>
+            <button id="manage-models" type="button" title="Download and manage models">Manage…</button>
+          </span>
+        </div>
+        <span id="custom-model" class="model-row" hidden>
+          <input id="model" type="text" placeholder="Path to .onnx / .pb / .tflite model" aria-label="Model path">
+          <button id="browse-model" type="button">Browse</button>
+        </span>
+        <p id="model-hint" class="hint"></p>
+      </div>
+      <div class="row">
+        <span>Engine</span>
+        <output id="engine" class="engine-value" title="Chosen automatically from the model">ONNX Runtime</output>
+      </div>
       <label class="row">Mode
         <select id="mode">
           <option value="auto" selected>Auto (fastest available)</option>
@@ -46,22 +61,6 @@
       <div id="custom-size" class="row custom" hidden>
         <label>W <input id="width" type="number" min="0" value="0"></label>
         <label>H <input id="height" type="number" min="0" value="0"></label>
-      </div>
-      <div id="model-section">
-        <div class="row">
-          <label for="model-select">Model</label>
-          <span class="model-picker">
-            <select id="model-select">
-              <option value="custom">Custom file…</option>
-            </select>
-            <button id="manage-models" type="button" title="Download and manage models">Manage…</button>
-          </span>
-        </div>
-        <span id="custom-model" class="model-row" hidden>
-          <input id="model" type="text" placeholder="Path to .onnx / .pb / .tflite model" aria-label="Model path">
-          <button id="browse-model" type="button">Browse</button>
-        </span>
-        <p id="model-hint" class="hint"></p>
       </div>
     </section>
 

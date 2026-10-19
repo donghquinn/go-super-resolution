@@ -116,23 +116,37 @@ ipcMain.handle('open-models-folder', async () => {
   return shell.openPath(models.dir);
 });
 
-// opts.modelId selects a managed model; otherwise opts.modelPath is a user-chosen file.
+// Engine for a custom model file, by extension.
+const ENGINE_BY_EXT = { '.onnx': 'onnx', '.pb': 'tensorflow', '.tflite': 'tflite' };
+
+// opts.modelId selects a managed model, opts.resize a plain OpenCV resize; otherwise
+// opts.modelPath is a user-chosen file. The engine follows from that choice.
 // Upscaling progress is sent as 'progress'; model downloads report via 'model-download'.
 ipcMain.handle('process', async (e, opts) => {
   const model = opts.modelId ? await models.find(opts.modelId) : null;
   if (opts.modelId && !model) throw new Error('The selected model is no longer available');
-  const modelPath = model ? await models.ensure(model.id) : opts.modelPath;
+
+  let engine = 'opencv';
+  let modelPath = '';
+  if (model) {
+    engine = 'onnx';
+    modelPath = await models.ensure(model.id);
+  } else if (!opts.resize) {
+    modelPath = opts.modelPath;
+    engine = ENGINE_BY_EXT[path.extname(modelPath).toLowerCase()];
+    if (!engine) throw new Error('Choose a .onnx, .pb or .tflite model file');
+  }
 
   const custom = opts.scale === 'custom';
   const scaleLabel = custom ? 'Custom' : `${opts.scale}x`;
-  const tag = model ? model.id.replace(/^file:/, '').replace(/\.onnx$/i, '') : opts.engine;
+  const tag = model ? model.id.replace(/^file:/, '').replace(/\.onnx$/i, '') : engine;
   const outputPath = outputPathFor(opts.inputPath, tag, scaleLabel);
   const result = await runBackend([
     '-input', opts.inputPath,
     '-output', outputPath,
     '-model', modelPath,
     '-mode', opts.mode,
-    '-engine', opts.engine,
+    '-engine', engine,
     '-scale', String(custom ? 1 : opts.scale),
     '-width', String(custom ? opts.width || 0 : 0),
     '-height', String(custom ? opts.height || 0 : 0),

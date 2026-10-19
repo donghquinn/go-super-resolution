@@ -1,6 +1,14 @@
 const IMAGE_EXT = /\.(jpe?g|png|bmp|tiff?)$/i;
 const DEVICE_NAMES = { cuda: 'CUDA GPU', coreml: 'Apple GPU (CoreML)', cpu: 'CPU' };
 const MODE_DEVICES = { gpu: 'cuda', mps: 'coreml' };
+// The engine follows from the model; main.js derives it the same way when processing.
+const ENGINES = {
+  onnx: 'ONNX Runtime',
+  opencv: 'OpenCV (resize only)',
+  tensorflow: 'TensorFlow',
+  tflite: 'TensorFlow Lite',
+};
+const ENGINE_BY_EXT = { onnx: 'onnx', pb: 'tensorflow', tflite: 'tflite' };
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -12,7 +20,6 @@ const els = {
   width: $('width'),
   height: $('height'),
   model: $('model'),
-  modelSection: $('model-section'),
   modelSelect: $('model-select'),
   customModel: $('custom-model'),
   modelHint: $('model-hint'),
@@ -113,7 +120,7 @@ async function refreshModels() {
   state.models = models;
   els.modelsDir.textContent = dir;
 
-  for (const node of [...els.modelSelect.children]) if (node.value !== 'custom') node.remove();
+  for (const node of [...els.modelSelect.children]) if (node.label !== 'Other') node.remove();
   const group = (label, items) => {
     const g = document.createElement('optgroup');
     g.label = label;
@@ -128,21 +135,40 @@ async function refreshModels() {
   );
 
   const exists = (id) => models.some((m) => m.id === id && (m.downloaded || m.source === 'catalog'));
-  els.modelSelect.value = !firstLoad && (selected === 'custom' || exists(selected)) ? selected : models[0].id;
+  const keep = !firstLoad && (selected === 'custom' || selected === 'resize' || exists(selected));
+  els.modelSelect.value = keep ? selected : models[0].id;
   updateModelUI();
   if (els.modelsDialog.open) renderModelList();
 }
 
-// Managed models are ONNX, so other engines need a custom model file; opencv needs no model.
-function updateModelUI() {
-  const onnx = els.engine.value === 'onnx';
-  els.modelSection.hidden = els.engine.value === 'opencv';
-  for (const opt of els.modelSelect.querySelectorAll('option')) opt.disabled = !onnx && opt.value !== 'custom';
-  if (!onnx) els.modelSelect.value = 'custom';
+// Engine for the current model choice: managed models are ONNX, "Basic resize" is OpenCV, and a
+// custom file's engine comes from its extension (null until a supported file is chosen).
+function currentEngine() {
+  const choice = els.modelSelect.value;
+  if (choice === 'resize') return 'opencv';
+  if (choice !== 'custom') return 'onnx';
+  const ext = els.model.value.trim().split('.').pop().toLowerCase();
+  return ENGINE_BY_EXT[ext] || null;
+}
 
-  const model = state.models.find((m) => m.id === els.modelSelect.value);
-  els.customModel.hidden = Boolean(model);
-  els.modelHint.textContent = model ? modelSummary(model) : '';
+function updateModelUI() {
+  const choice = els.modelSelect.value;
+  const model = state.models.find((m) => m.id === choice);
+  const engine = currentEngine();
+  els.customModel.hidden = choice !== 'custom';
+  els.engine.value = engine ? ENGINES[engine] : '—';
+
+  if (model) {
+    els.modelHint.textContent = modelSummary(model);
+  } else if (choice === 'resize') {
+    els.modelHint.textContent = 'Plain bicubic resize, no AI model';
+  } else if (!engine) {
+    els.modelHint.textContent = 'Choose a .onnx, .pb or .tflite model file';
+  } else if (engine === 'onnx') {
+    els.modelHint.textContent = '';
+  } else {
+    els.modelHint.textContent = `${ENGINES[engine]} inference isn't implemented yet: the image is resized without AI`;
+  }
 }
 
 function modelSummary(m) {
@@ -204,7 +230,6 @@ function renderModelList() {
 }
 
 function selectModel(id) {
-  els.engine.value = 'onnx';
   els.modelSelect.value = id;
   updateModelUI();
   els.modelsDialog.close();
@@ -291,14 +316,15 @@ async function processImage() {
   els.progress.hidden = false;
   setStatus('Processing...');
 
-  const modelId = els.engine.value === 'onnx' && els.modelSelect.value !== 'custom' ? els.modelSelect.value : null;
+  const choice = els.modelSelect.value;
+  const modelId = choice === 'custom' || choice === 'resize' ? null : choice;
   state.activeModelId = modelId;
   try {
     const result = await window.sr.process({
       inputPath: state.imagePath,
       modelId,
-      modelPath: els.model.value,
-      engine: els.engine.value,
+      resize: choice === 'resize',
+      modelPath: els.model.value.trim(),
       mode: els.mode.value,
       scale: els.scale.value === 'custom' ? 'custom' : Number(els.scale.value),
       width: Number(els.width.value) || 0,
@@ -346,15 +372,18 @@ $('browse-image').addEventListener('click', async () => {
 
 $('browse-model').addEventListener('click', async () => {
   const filePath = await window.sr.openModel();
-  if (filePath) els.model.value = filePath;
+  if (filePath) {
+    els.model.value = filePath;
+    updateModelUI();
+  }
 });
 
 els.scale.addEventListener('change', () => {
   els.customSize.hidden = els.scale.value !== 'custom';
 });
 
-els.engine.addEventListener('change', updateModelUI);
 els.modelSelect.addEventListener('change', updateModelUI);
+els.model.addEventListener('input', updateModelUI);
 els.process.addEventListener('click', processImage);
 els.save.addEventListener('click', saveResult);
 els.clear.addEventListener('click', clearAll);

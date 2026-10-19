@@ -44,8 +44,8 @@ A powerful, cross-platform application for AI-powered image super-resolution wit
 2. **Select Image**: Drag & drop or browse for an image file
 
 3. **Configure Settings**:
-   - Choose engine (OpenCV for quick testing)
-   - Select hardware mode (CPU/GPU/MPS)
+   - Choose a model (the engine is set automatically)
+   - Select hardware mode (Auto picks CUDA / Apple GPU / CPU)
    - Pick scale factor or custom dimensions
 
 4. **Process**: Click "Process Image" and watch the magic happen!

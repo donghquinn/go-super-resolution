@@ -78,10 +78,10 @@ models with [ONNX Runtime](https://onnxruntime.ai/).
    - Or click "📁 Browse Files" to select an image
 
 2. **Configure Settings**:
-   - **Engine**: Choose processing engine (OpenCV, ONNX, TensorFlow, TFLite)
-   - **Mode**: Select hardware acceleration (CPU, GPU, MPS)
+   - **Model**: Pick a model (**Manage…** downloads more), **Basic resize (no AI)**, or **Custom file…**
+   - **Engine**: Set automatically from the model (see below)
+   - **Mode**: Hardware acceleration (Auto, GPU (CUDA), Apple GPU, CPU)
    - **Scale**: Choose scale factor (2x, 4x, 8x) or custom dimensions
-   - **Model**: Browse and select AI model file (for ONNX/TensorFlow engines)
 
 3. **Process Image**:
    - Click "🚀 Process Image" to start super-resolution
@@ -97,12 +97,14 @@ models with [ONNX Runtime](https://onnxruntime.ai/).
 
 ### Engine Options
 
-| Engine | Description | Model Required | Performance |
-|--------|-------------|----------------|-------------|
-| **OpenCV** | Simple upscaling algorithms | ❌ No | Fast |
-| **ONNX** | AI model inference via ONNX Runtime | ✅ .onnx file | Medium |
-| **TensorFlow** | AI model inference via TensorFlow | ✅ .pb file | Medium |
-| **TensorFlow Lite** | Lightweight AI inference | ✅ .tflite file | Fast |
+The engine is chosen automatically from the **Model** menu, so it always matches the model:
+
+| Model choice | Engine |
+|--------------|--------|
+| Any managed model (catalog or added from a URL) | **ONNX Runtime** |
+| **Basic resize (no AI)** | **OpenCV** bicubic resize |
+| **Custom file…** `.onnx` | **ONNX Runtime** |
+| **Custom file…** `.pb` / `.tflite` | **TensorFlow** / **TensorFlow Lite**: not implemented yet, the image is resized without AI |
 
 ### Mode Options
 
