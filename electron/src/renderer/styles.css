@@ -314,3 +314,14 @@ dialog.viewer {
   border-top: 1px solid var(--border);
   background: var(--panel);
 }
+
+.gpu-setting { margin-bottom: 8px; }
+.gpu-setting .hint { margin: 2px 0 0 24px; }
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.check-row input { margin: 0; width: 16px; height: 16px; accent-color: var(--accent); }
+.check-row:has(input:disabled) { cursor: default; color: var(--muted); }

@@ -45,7 +45,7 @@ A powerful, cross-platform application for AI-powered image super-resolution wit
 
 3. **Configure Settings**:
    - Choose a model (the engine is set automatically)
-   - Select hardware mode (Auto picks CUDA / Apple GPU / CPU)
+   - GPU (CUDA / Apple GPU) is detected and used automatically; untick "Use GPU" for CPU only
    - Pick scale factor or custom dimensions
 
 4. **Process**: Click "Process Image" and watch the magic happen!
@@ -142,10 +142,9 @@ The GUI provides an intuitive interface with the following components:
    - Supports: JPG, PNG, BMP, TIFF formats
 
 2. **Configure Settings**:
-   - **Engine**: Choose processing method
-   - **Mode**: Select hardware acceleration
+   - **Model**: Pick a model (**Manage…** downloads more); the engine is set automatically
+   - **Use GPU when available**: on by default; GPUs are detected automatically
    - **Scale**: Pick enhancement factor or custom dimensions
-   - **Model**: Browse for AI model file (ONNX/TensorFlow engines)
 
 3. **Process Image**:
    - Click "Process Image"

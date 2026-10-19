@@ -134,7 +134,11 @@ func (u *onnxUpscaler) init(modelPath string, mode InferenceMode) error {
 	if dims[2] > 0 && dims[3] > 0 {
 		u.tileH, u.tileW, u.fixedSize = int(dims[2]), int(dims[3]), true
 	}
-	u.chain = deviceChain(mode, hasAttention(model))
+	attention := hasAttention(model)
+	u.chain = deviceChain(mode, attention)
+	if mode == ModeAuto && attention && runtime.GOOS == "darwin" {
+		u.warnings = append(u.warnings, "Apple GPU not used: transformer models like this one run faster on CPU")
+	}
 	// Tiles always have the same shape; pinning it lets ORT/CoreML plan a static graph.
 	u.model = model
 	if fixed, err := withStaticInputShape(model, []int64{1, 3, int64(u.tileH), int64(u.tileW)}); err == nil {

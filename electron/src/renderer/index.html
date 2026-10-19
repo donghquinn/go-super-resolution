@@ -42,14 +42,13 @@
         <span>Engine</span>
         <output id="engine" class="engine-value" title="Chosen automatically from the model">ONNX Runtime</output>
       </div>
-      <label class="row">Mode
-        <select id="mode">
-          <option value="auto" selected>Auto (fastest available)</option>
-          <option value="gpu">GPU (CUDA)</option>
-          <option value="mps">Apple GPU (MPS / CoreML)</option>
-          <option value="cpu">CPU</option>
-        </select>
-      </label>
+      <div class="gpu-setting">
+        <label class="check-row">
+          <input id="use-gpu" type="checkbox" checked>
+          Use GPU when available
+        </label>
+        <p id="device-hint" class="hint">Detecting GPU...</p>
+      </div>
       <label class="row">Scale
         <select id="scale">
           <option value="2">2x</option>

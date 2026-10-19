@@ -1,6 +1,6 @@
 const IMAGE_EXT = /\.(jpe?g|png|bmp|tiff?)$/i;
-const DEVICE_NAMES = { cuda: 'CUDA GPU', coreml: 'Apple GPU (CoreML)', cpu: 'CPU' };
-const MODE_DEVICES = { gpu: 'cuda', mps: 'coreml' };
+const DEVICE_NAMES = { cuda: 'NVIDIA GPU (CUDA)', coreml: 'Apple GPU (CoreML)', cpu: 'CPU' };
+const GPU_PREF_KEY = 'useGpu';
 // The engine follows from the model; main.js derives it the same way when processing.
 const ENGINES = {
   onnx: 'ONNX Runtime',
@@ -14,7 +14,8 @@ const $ = (id) => document.getElementById(id);
 const els = {
   dropZone: $('drop-zone'),
   engine: $('engine'),
-  mode: $('mode'),
+  useGpu: $('use-gpu'),
+  deviceHint: $('device-hint'),
   scale: $('scale'),
   customSize: $('custom-size'),
   width: $('width'),
@@ -46,7 +47,14 @@ const els = {
   progress: $('progress'),
 };
 
-const state = { imagePath: null, resultPath: null, processing: false, models: [], activeModelId: null };
+const state = {
+  imagePath: null,
+  resultPath: null,
+  processing: false,
+  models: [],
+  activeModelId: null,
+  gpus: null, // usable GPU devices, once detected
+};
 
 const basename = (p) => p.split(/[\\/]/).pop();
 const setStatus = (text) => { els.status.textContent = text; };
@@ -120,29 +128,46 @@ async function loadImage(filePath) {
   setStatus(`Loaded: ${basename(filePath)} (${w}x${h})`);
 }
 
-// Marks GPU modes this machine can't use and describes what Auto will pick.
-async function refreshDevices() {
-  let devices;
+// Detects usable GPUs once at startup. GPU use is on by default; the checkbox lets users opt out
+// (remembered per machine), which runs everything on CPU.
+async function detectGpus() {
   try {
-    devices = await window.sr.listDevices();
+    const devices = await window.sr.listDevices();
+    state.gpus = devices.filter((d) => d.available && d.id !== 'cpu');
   } catch (err) {
-    els.mode.title = `Could not detect devices: ${errorText(err)}`;
-    return;
+    state.gpus = [];
+    els.deviceHint.title = errorText(err);
   }
-  const byId = Object.fromEntries(devices.map((d) => [d.id, d]));
-  for (const opt of els.mode.options) {
-    const device = byId[MODE_DEVICES[opt.value]];
-    if (device && !device.available) {
-      opt.disabled = true;
-      opt.textContent += ' (not available)';
-      opt.title = device.reason;
-    }
+  updateGpuUI();
+}
+
+function updateGpuUI() {
+  if (!state.gpus) return;
+  const names = state.gpus.map((d) => DEVICE_NAMES[d.id] || d.name).join(', ');
+  els.useGpu.disabled = state.gpus.length === 0;
+  if (!state.gpus.length) {
+    els.deviceHint.textContent = 'No usable GPU found: runs on CPU';
+  } else if (els.useGpu.checked) {
+    els.deviceHint.textContent = `Detected ${names}`;
+  } else {
+    els.deviceHint.textContent = `GPU off: runs on CPU (${names} available)`;
   }
-  const accelerators = devices.filter((d) => d.available && d.id !== 'cpu').map((d) => DEVICE_NAMES[d.id]);
-  els.mode.options[0].title = accelerators.length
-    ? `Uses ${accelerators.join(' or ')} when it's faster for the model, otherwise CPU`
-    : 'No GPU acceleration available: runs on CPU';
-  if (els.mode.selectedOptions[0]?.disabled) els.mode.value = 'auto';
+}
+
+function loadGpuPreference() {
+  try {
+    els.useGpu.checked = localStorage.getItem(GPU_PREF_KEY) !== 'false';
+  } catch {
+    // storage unavailable: keep the default (on)
+  }
+}
+
+function saveGpuPreference() {
+  try {
+    localStorage.setItem(GPU_PREF_KEY, String(els.useGpu.checked));
+  } catch {
+    // not critical
+  }
 }
 
 // (Re)builds the model menu: downloaded models first, then ones that download on first use.
@@ -358,7 +383,7 @@ async function processImage() {
       modelId,
       resize: choice === 'resize',
       modelPath: els.model.value.trim(),
-      mode: els.mode.value,
+      mode: els.useGpu.checked ? 'auto' : 'cpu', // auto: fastest usable GPU, else CPU
       scale: els.scale.value === 'custom' ? 'custom' : Number(els.scale.value),
       width: Number(els.width.value) || 0,
       height: Number(els.height.value) || 0,
@@ -446,5 +471,10 @@ els.manageModels.addEventListener('click', () => {
 $('close-models').addEventListener('click', () => els.modelsDialog.close());
 $('open-models-folder').addEventListener('click', () => window.sr.openModelsFolder());
 els.urlForm.addEventListener('submit', addModelFromUrl);
-refreshDevices();
+loadGpuPreference();
+els.useGpu.addEventListener('change', () => {
+  saveGpuPreference();
+  updateGpuUI();
+});
+detectGpus();
 refreshModels();

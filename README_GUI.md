@@ -80,7 +80,7 @@ models with [ONNX Runtime](https://onnxruntime.ai/).
 2. **Configure Settings**:
    - **Model**: Pick a model (**Manage…** downloads more), **Basic resize (no AI)**, or **Custom file…**
    - **Engine**: Set automatically from the model (see below)
-   - **Mode**: Hardware acceleration (Auto, GPU (CUDA), Apple GPU, CPU)
+   - **Use GPU when available**: on by default; GPUs are detected automatically
    - **Scale**: Choose scale factor (2x, 4x, 8x) or custom dimensions
 
 3. **Process Image**:
@@ -110,25 +110,26 @@ The engine is chosen automatically from the **Model** menu, so it always matches
 | **Custom file…** `.onnx` | **ONNX Runtime** |
 | **Custom file…** `.pb` / `.tflite` | **TensorFlow** / **TensorFlow Lite**: not implemented yet, the image is resized without AI |
 
-### Mode Options
+### GPU Acceleration
 
-| Mode | Description | Availability |
-|------|-------------|--------------|
-| **Auto** (default) | Fastest available device: CUDA, then Apple GPU, then CPU | All platforms |
-| **GPU (CUDA)** | NVIDIA GPU via ONNX Runtime's CUDA provider | Windows/Linux with CUDA set up (see below) |
-| **Apple GPU (MPS / CoreML)** | Apple GPU and Neural Engine via ONNX Runtime's CoreML provider | macOS |
-| **CPU** | CPU only | All platforms |
+The app detects usable GPUs at startup (`sr-backend -devices`) and uses them automatically:
+- an **NVIDIA GPU via CUDA** on Windows/Linux;
+- the **Apple GPU / Neural Engine via CoreML** on macOS.
 
-The app checks which devices actually work when it starts (`sr-backend -devices`), and disables
-modes that aren't available. The status bar shows the device each job ran on. If a device fails
-for a model, either when the session is created or on the first tile, the job falls back to the
-next device instead of failing, and the status bar says why.
+The line under **Use GPU when available** shows what was detected. Clear the checkbox to run
+everything on CPU; the choice is remembered. If no GPU is usable, the checkbox is disabled.
+The status bar shows the device each job ran on.
 
-In **Auto** mode on macOS, transformer models with attention layers run on CPU instead of
-CoreML. This covers DAT/DAT2 (UltraSharpV2, RealWebPhoto), HAT and SwinIR, and is detected from
-the model itself. These models measured 2–10x *slower* on CoreML than on CPU. Convolutional
-models such as RealPLKSR measured 5–9x faster on CoreML. Choosing **Apple GPU** explicitly
-always uses CoreML.
+If a GPU fails for a model, either when the session is created or on the first tile, the job
+falls back to the next device instead of failing, and the status bar says why.
+
+On macOS, transformer models with attention layers run on CPU even with GPU on. This covers
+DAT/DAT2 (UltraSharpV2, RealWebPhoto), HAT and SwinIR, and is detected from the model itself.
+These models measured 2–10x *slower* on CoreML than on CPU, while convolutional models such as
+RealPLKSR measured 5–9x faster. The status bar notes when this happens.
+
+The command-line backend still accepts `-mode auto|cpu|gpu|mps` (`gpu` = CUDA, `mps` = CoreML)
+to force a device.
 
 **CUDA setup:** Homebrew's and the default ONNX Runtime downloads are CPU builds (plus CoreML on
 macOS). For NVIDIA GPUs, install the GPU build of ONNX Runtime 1.31 (`onnxruntime-gpu`) with
@@ -165,9 +166,9 @@ Catalog (every model checked against ONNX Runtime with this backend):
 | **RealPLKSR 2x** | 2x | RealPLKSR | 30 MB | MIT | Native 2x, faithful (non-GAN) |
 | **RealPLKSR 4x** | 4x | RealPLKSR | 30 MB | MIT | Faithful (non-GAN) 4x |
 
-CC-BY-NC-SA models are for non-commercial use only. On Apple Silicon in Auto mode, RealPLKSR
+CC-BY-NC-SA models are for non-commercial use only. On Apple Silicon with GPU on, RealPLKSR
 models run on CoreML (5–9x faster than CPU), and DAT2 models run on CPU (see
-[Mode Options](#mode-options)).
+[GPU Acceleration](#gpu-acceleration)).
 
 `python3 download_model.py` pre-downloads the two UltraSharpV2 models.
 
