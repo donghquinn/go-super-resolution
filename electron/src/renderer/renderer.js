@@ -39,6 +39,10 @@ const els = {
   originalSize: $('original-size'),
   resultSize: $('result-size'),
   status: $('status'),
+  zoomOriginal: $('zoom-original'),
+  zoomResult: $('zoom-result'),
+  downloadOriginal: $('download-original'),
+  downloadResult: $('download-result'),
   progress: $('progress'),
 };
 
@@ -58,6 +62,35 @@ async function showImage(img, filePath) {
     img.hidden = false;
   });
   img.nextElementSibling.hidden = true;
+}
+
+// Zoom/Download buttons follow which images are loaded.
+function updateImageActions() {
+  els.zoomOriginal.disabled = els.downloadOriginal.disabled = !state.imagePath;
+  els.zoomResult.disabled = els.downloadResult.disabled = !state.resultPath;
+  els.save.disabled = !state.resultPath;
+}
+
+const viewer = new ImageViewer($('viewer'), { onDownload: (p) => downloadImage(p) });
+
+function openViewer(view) {
+  if (!state.imagePath || (view === 'result' && !state.resultPath)) return;
+  const source = (img, filePath) => filePath && {
+    path: filePath, url: img.src, width: img.naturalWidth, height: img.naturalHeight,
+  };
+  viewer.open({
+    original: source(els.originalImg, state.imagePath),
+    result: source(els.resultImg, state.resultPath),
+  }, view);
+}
+
+async function downloadImage(filePath) {
+  try {
+    const saved = await window.sr.saveImage(filePath);
+    if (saved) setStatus(`Saved: ${saved}`);
+  } catch (err) {
+    setStatus(`Error: ${errorText(err)}`);
+  }
 }
 
 function resetImage(img, sizeEl) {
@@ -81,7 +114,7 @@ async function loadImage(filePath) {
   state.imagePath = filePath;
   state.resultPath = null;
   resetImage(els.resultImg, els.resultSize);
-  els.save.disabled = true;
+  updateImageActions();
   const { naturalWidth: w, naturalHeight: h } = els.originalImg;
   els.originalSize.textContent = `(${w}×${h})`;
   setStatus(`Loaded: ${basename(filePath)} (${w}x${h})`);
@@ -330,10 +363,10 @@ async function processImage() {
       width: Number(els.width.value) || 0,
       height: Number(els.height.value) || 0,
     });
-    state.resultPath = result.outputPath;
     await showImage(els.resultImg, result.outputPath);
+    state.resultPath = result.outputPath;
     els.resultSize.textContent = `(${els.resultImg.naturalWidth}×${els.resultImg.naturalHeight})`;
-    els.save.disabled = false;
+    updateImageActions();
     const device = result.device ? ` on ${DEVICE_NAMES[result.device] || result.device}` : '';
     const warnings = result.warnings?.length ? ` (${result.warnings.join('; ')})` : '';
     setStatus(`Processing completed successfully${device}! Saved to ${basename(result.outputPath)}${warnings}`);
@@ -346,22 +379,16 @@ async function processImage() {
   }
 }
 
-async function saveResult() {
-  if (!state.resultPath) return;
-  try {
-    const saved = await window.sr.saveResult(state.resultPath);
-    if (saved) setStatus(`Saved: ${saved}`);
-  } catch (err) {
-    setStatus(`Error: ${err.message}`);
-  }
+function saveResult() {
+  if (state.resultPath) downloadImage(state.resultPath);
 }
 
 function clearAll() {
   state.imagePath = null;
   state.resultPath = null;
+  updateImageActions();
   resetImage(els.originalImg, els.originalSize);
   resetImage(els.resultImg, els.resultSize);
-  els.save.disabled = true;
   setStatus('Ready - Select an image to get started');
 }
 
@@ -386,6 +413,13 @@ els.modelSelect.addEventListener('change', updateModelUI);
 els.model.addEventListener('input', updateModelUI);
 els.process.addEventListener('click', processImage);
 els.save.addEventListener('click', saveResult);
+els.zoomOriginal.addEventListener('click', () => openViewer('original'));
+els.zoomResult.addEventListener('click', () => openViewer('result'));
+els.downloadOriginal.addEventListener('click', () => downloadImage(state.imagePath));
+els.downloadResult.addEventListener('click', () => downloadImage(state.resultPath));
+for (const frame of document.querySelectorAll('.frame')) {
+  frame.addEventListener('dblclick', () => openViewer(frame.dataset.image));
+}
 els.clear.addEventListener('click', clearAll);
 
 // Accept drops anywhere in the window; highlight the drop zone while dragging.

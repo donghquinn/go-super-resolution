@@ -76,12 +76,24 @@
       <h2>Image Comparison</h2>
       <div class="panes">
         <figure>
-          <figcaption>Original <span id="original-size"></span></figcaption>
-          <div class="frame"><img id="original-img" alt="" hidden><span class="placeholder">No image</span></div>
+          <figcaption>
+            <span class="caption-title">Original <span id="original-size" class="dim"></span></span>
+            <span class="pane-actions">
+              <button id="zoom-original" type="button" disabled>Zoom</button>
+              <button id="download-original" type="button" disabled>Download</button>
+            </span>
+          </figcaption>
+          <div class="frame" data-image="original" title="Double-click to zoom"><img id="original-img" alt="" hidden><span class="placeholder">No image</span></div>
         </figure>
         <figure>
-          <figcaption>Super Resolution <span id="result-size"></span></figcaption>
-          <div class="frame"><img id="result-img" alt="" hidden><span class="placeholder">No result</span></div>
+          <figcaption>
+            <span class="caption-title">Super Resolution <span id="result-size" class="dim"></span></span>
+            <span class="pane-actions">
+              <button id="zoom-result" type="button" disabled>Zoom</button>
+              <button id="download-result" type="button" disabled>Download</button>
+            </span>
+          </figcaption>
+          <div class="frame" data-image="result" title="Double-click to zoom"><img id="result-img" alt="" hidden><span class="placeholder">No result</span></div>
         </figure>
       </div>
     </section>
@@ -111,6 +123,33 @@
     </footer>
   </dialog>
 
+  <dialog id="viewer" class="viewer" aria-label="Image viewer">
+    <header class="viewer-toolbar">
+      <div class="segmented" role="group" aria-label="View">
+        <button type="button" data-view="original" aria-pressed="false">Original</button>
+        <button type="button" data-view="compare" aria-pressed="false">Side by side</button>
+        <button type="button" data-view="result" aria-pressed="false">Result</button>
+      </div>
+      <div class="zoom-controls">
+        <button id="viewer-zoom-out" type="button" aria-label="Zoom out">−</button>
+        <output id="viewer-zoom" aria-live="polite">100%</output>
+        <button id="viewer-zoom-in" type="button" aria-label="Zoom in">+</button>
+        <button id="viewer-fit" type="button">Fit</button>
+        <button id="viewer-actual" type="button">100%</button>
+      </div>
+      <div class="viewer-actions">
+        <button id="viewer-download" type="button">Download</button>
+        <button id="viewer-close" type="button" aria-label="Close">✕</button>
+      </div>
+    </header>
+    <div class="viewer-body">
+      <div class="viewer-pane" data-pane="original"><img alt="Original image" draggable="false"><span class="viewer-label">Original</span></div>
+      <div class="viewer-pane" data-pane="result"><img alt="Super resolution result" draggable="false"><span class="viewer-label">Super Resolution</span></div>
+    </div>
+    <p class="viewer-hint">Scroll or pinch to zoom · drag to pan · double-click for 100% · keys: + − 0 (fit) 1 (100%) arrows · Esc to close</p>
+  </dialog>
+
+  <script src="viewer.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

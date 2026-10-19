@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('sr', {
   openImage: () => ipcRenderer.invoke('open-image'),
   openModel: () => ipcRenderer.invoke('open-model'),
-  saveResult: (resultPath) => ipcRenderer.invoke('save-result', resultPath),
+  saveImage: (imagePath) => ipcRenderer.invoke('save-image', imagePath),
   listModels: () => ipcRenderer.invoke('list-models'),
   listDevices: () => ipcRenderer.invoke('list-devices'),
   downloadModel: (id) => ipcRenderer.invoke('download-model', id),

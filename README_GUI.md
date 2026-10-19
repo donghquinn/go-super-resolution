@@ -91,9 +91,13 @@ models with [ONNX Runtime](https://onnxruntime.ai/).
    - View original and enhanced images side by side
    - Zoom and pan to examine details
 
-5. **Save Result**:
-   - Click "💾 Save Result" to export the enhanced image
-   - Choose output format and location
+5. **Inspect and save**:
+   - Each image has **Zoom** and **Download** buttons. You can also double-click an image to zoom.
+   - The zoom viewer shows the **Original**, the **Result**, or both **Side by side** with zoom
+     and pan kept in sync, so you can compare the same spot. The original is drawn as sharp pixels
+     when magnified, so you see what the model started from.
+   - **Download** (or **Save Result**) saves a copy of the source or the result, in the same
+     format as the file.
 
 ### Engine Options
 
@@ -199,15 +203,18 @@ electron/bin/sr-backend -inspect -model path/to/model.onnx
 | **TensorFlow** | .pb | TensorFlow | TensorFlow SavedModel |
 | **TensorFlow Lite** | .tflite | TFLite | Lightweight models |
 
-## Keyboard Shortcuts
+## Zoom Viewer Controls
 
-| Shortcut | Action |
-|----------|--------|
-| **Ctrl+O** | Open image file |
-| **Ctrl+S** | Save result |
-| **Ctrl+R** | Process image |
-| **Ctrl+C** | Clear images |
-| **F5** | Refresh |
+| Input | Action |
+|-------|--------|
+| Scroll wheel / trackpad pinch | Zoom around the cursor |
+| Drag | Pan |
+| Double-click | Zoom to 100% at the cursor, or back to fit |
+| **+** / **−** | Zoom in / out |
+| **0** | Fit to window |
+| **1** | 100% (actual pixels of the shown image) |
+| Arrow keys | Pan |
+| **Esc** | Close |
 
 ## Troubleshooting
 
@@ -246,7 +253,7 @@ electron/bin/sr-backend -inspect -model path/to/model.onnx
 
 - `electron/src/main.js` - window, native file dialogs, and IPC; spawns `sr-backend` per job
 - `electron/src/preload.js` - the `window.sr` bridge (context isolation, sandboxed renderer)
-- `electron/src/renderer/` - UI (HTML/CSS/JS)
+- `electron/src/renderer/` - UI (HTML/CSS/JS); `viewer.js` is the zoom viewer
 - `electron/src/models.js` - model catalog, downloads, URL import
 - `sr-backend.go` - CLI that processes one image (or `-inspect`s a model) and prints a JSON result line
 - `devices.go` - execution device selection (CUDA / CoreML / CPU) and `-devices` probing

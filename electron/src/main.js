@@ -97,12 +97,16 @@ ipcMain.handle('open-model', async () => {
   return canceled ? null : filePaths[0];
 });
 
-ipcMain.handle('save-result', async (_e, resultPath) => {
+// Saves a copy of an image (the source or a result) where the user chooses.
+ipcMain.handle('save-image', async (_e, imagePath) => {
+  const ext = path.extname(imagePath).slice(1).toLowerCase();
+  if (!IMAGE_EXTENSIONS.includes(ext)) throw new Error('Only image files can be saved');
   const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: `super_resolution_result${path.extname(resultPath)}`,
+    defaultPath: path.join(app.getPath('downloads'), path.basename(imagePath)),
+    filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
   });
   if (canceled || !filePath) return null;
-  await fs.copyFile(resultPath, filePath);
+  await fs.copyFile(imagePath, filePath);
   return filePath;
 });
 

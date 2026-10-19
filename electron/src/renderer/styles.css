@@ -133,11 +133,17 @@ figure {
   min-height: 0;
 }
 figcaption {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-weight: 600;
   margin-bottom: 6px;
+  min-height: 28px;
 }
-figcaption span { color: var(--muted); font-weight: 400; }
+figcaption .dim { color: var(--muted); font-weight: 400; }
+.pane-actions { display: flex; gap: 6px; }
+.pane-actions button { padding: 3px 10px; font-size: 12px; font-weight: 400; }
 
 .frame {
   flex: 1;
@@ -149,7 +155,7 @@ figcaption span { color: var(--muted); font-weight: 400; }
   border-radius: 6px;
   overflow: hidden;
 }
-.frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.frame img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .placeholder { color: var(--muted); }
 
 .status {
@@ -223,4 +229,88 @@ dialog[open] { display: flex; flex-direction: column; }
   width: 60%;
   padding: 5px 9px;
   color: var(--muted);
+}
+
+/* Zoom viewer */
+dialog.viewer {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--bg);
+}
+.viewer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.segmented { display: flex; }
+.segmented button { border-radius: 0; margin-left: -1px; }
+.segmented button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.segmented button:last-child { border-radius: 0 6px 6px 0; }
+.segmented button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  position: relative;
+}
+.zoom-controls, .viewer-actions { display: flex; align-items: center; gap: 6px; }
+#viewer-zoom {
+  min-width: 56px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.viewer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 2px;
+  background: var(--border);
+}
+.viewer-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--frame);
+  cursor: grab;
+  touch-action: none;
+}
+.viewer-pane.dragging { cursor: grabbing; }
+.viewer-pane img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  user-select: none;
+  pointer-events: none;
+}
+.viewer-pane img.pixelated { image-rendering: pixelated; }
+.viewer-label {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
+.viewer-hint {
+  margin: 0;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: var(--panel);
 }
