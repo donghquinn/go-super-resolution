@@ -1,77 +1,53 @@
 #!/usr/bin/env python3
 """
-Helper script to download and convert ESRGAN model to ONNX format.
-This is a one-time setup script.
+Download the built-in ONNX super-resolution models into models/.
+
+The Electron app downloads these on first use; run this to fetch them ahead of time.
+Models: 4x-UltraSharpV2 and 4x-UltraSharpV2 Lite by Kim2091 (CC-BY-NC-SA-4.0, non-commercial).
 """
 
-import torch
-import torch.onnx
+import sys
 import urllib.request
-import os
 from pathlib import Path
 
-def download_realesrgan_model():
-    """Download Real-ESRGAN model and convert to ONNX"""
-    
-    # Create models directory
-    models_dir = Path("models")
+BASE_URL = "https://huggingface.co/Kim2091/UltraSharpV2/resolve/main/"
+MODELS = [
+    "4x-UltraSharpV2_fp32_op17.onnx",       # DAT2, best quality (52 MB)
+    "4x-UltraSharpV2_Lite_fp32_op17.onnx",  # RealPLKSR, faster (30 MB)
+]
+
+
+def download(name: str, models_dir: Path) -> None:
+    dest = models_dir / name
+    if dest.exists():
+        print(f"✓ {name} (already downloaded)")
+        return
+    part = dest.with_suffix(dest.suffix + ".part")
+
+    def report(blocks: int, block_size: int, total: int) -> None:
+        if total > 0:
+            print(f"\r  {name}: {min(blocks * block_size / total, 1):.0%}", end="", flush=True)
+
+    try:
+        urllib.request.urlretrieve(BASE_URL + name, part, report)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    part.rename(dest)
+    print(f"\r✓ {name}          ")
+
+
+def main() -> int:
+    models_dir = Path(__file__).resolve().parent / "models"
     models_dir.mkdir(exist_ok=True)
-    
-    # For this example, we'll create a simple ESRGAN-like model
-    # In practice, you'd download a real pre-trained model
-    
-    print("Creating a simple super-resolution model for demonstration...")
-    
-    # Simple CNN-based super-resolution model
-    class SimpleSR(torch.nn.Module):
-        def __init__(self):
-            super(SimpleSR, self).__init__()
-            self.conv1 = torch.nn.Conv2d(3, 64, 3, padding=1)
-            self.conv2 = torch.nn.Conv2d(64, 64, 3, padding=1)
-            self.conv3 = torch.nn.Conv2d(64, 3, 3, padding=1)
-            self.upsample = torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-            
-        def forward(self, x):
-            x = torch.relu(self.conv1(x))
-            x = torch.relu(self.conv2(x))
-            x = self.upsample(x)
-            x = torch.sigmoid(self.conv3(x))
-            return x
-    
-    # Create model
-    model = SimpleSR()
-    model.eval()
-    
-    # Create dummy input (batch_size=1, channels=3, height=64, width=64)
-    dummy_input = torch.randn(1, 3, 64, 64)
-    
-    # Export to ONNX
-    onnx_path = models_dir / "esrgan.onnx"
-    torch.onnx.export(
-        model,
-        dummy_input,
-        str(onnx_path),
-        export_params=True,
-        opset_version=11,
-        do_constant_folding=True,
-        input_names=['input'],
-        output_names=['output'],
-        dynamic_axes={
-            'input': {0: 'batch_size', 2: 'height', 3: 'width'},
-            'output': {0: 'batch_size', 2: 'height', 3: 'width'}
-        }
-    )
-    
-    print(f"Model saved to {onnx_path}")
-    print("Note: This is a simple demonstration model.")
-    print("For real super-resolution, use a pre-trained ESRGAN model.")
-    
-    return str(onnx_path)
+    try:
+        for name in MODELS:
+            download(name, models_dir)
+    except Exception as e:
+        print(f"\n✗ Download failed: {e}")
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    try:
-        model_path = download_realesrgan_model()
-        print(f"✓ Model ready at: {model_path}")
-    except Exception as e:
-        print(f"✗ Error: {e}")
-        print("Please install PyTorch: pip install torch torchvision")
+    sys.exit(main())

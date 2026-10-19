@@ -21,8 +21,8 @@
       <h2>Settings</h2>
       <label class="row">Engine
         <select id="engine">
-          <option value="opencv" selected>opencv</option>
-          <option value="onnx">onnx</option>
+          <option value="onnx" selected>onnx</option>
+          <option value="opencv">opencv</option>
           <option value="tensorflow">tensorflow</option>
           <option value="tflite">tflite</option>
         </select>
@@ -46,12 +46,18 @@
         <label>W <input id="width" type="number" min="0" value="0"></label>
         <label>H <input id="height" type="number" min="0" value="0"></label>
       </div>
-      <label class="stack">Model
-        <span class="model-row">
-          <input id="model" type="text" value="models/Real-ESRGAN-x4plus.onnx">
+      <div id="model-section">
+        <label class="row">Model
+          <select id="model-select">
+            <option value="custom">Custom file…</option>
+          </select>
+        </label>
+        <span id="custom-model" class="model-row" hidden>
+          <input id="model" type="text" placeholder="Path to .onnx / .pb / .tflite model" aria-label="Model path">
           <button id="browse-model" type="button">Browse</button>
         </span>
-      </label>
+        <p id="model-hint" class="hint"></p>
+      </div>
     </section>
 
     <div class="actions">

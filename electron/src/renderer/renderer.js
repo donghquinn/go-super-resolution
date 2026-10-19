@@ -10,6 +10,10 @@ const els = {
   width: $('width'),
   height: $('height'),
   model: $('model'),
+  modelSection: $('model-section'),
+  modelSelect: $('model-select'),
+  customModel: $('custom-model'),
+  modelHint: $('model-hint'),
   process: $('process'),
   save: $('save'),
   clear: $('clear'),
@@ -21,7 +25,7 @@ const els = {
   progress: $('progress'),
 };
 
-const state = { imagePath: null, resultPath: null, processing: false };
+const state = { imagePath: null, resultPath: null, processing: false, models: [] };
 
 const basename = (p) => p.split(/[\\/]/).pop();
 const setStatus = (text) => { els.status.textContent = text; };
@@ -65,6 +69,39 @@ async function loadImage(filePath) {
   setStatus(`Loaded: ${basename(filePath)} (${w}x${h})`);
 }
 
+// (Re)builds the built-in model options, keeping the current choice (first model on startup).
+async function refreshModels() {
+  const firstLoad = state.models.length === 0;
+  const selected = els.modelSelect.value;
+  state.models = await window.sr.listModels();
+  for (const opt of [...els.modelSelect.options]) if (opt.value !== 'custom') opt.remove();
+  els.modelSelect.prepend(...state.models.map((m) => new Option(m.label, m.id)));
+  els.modelSelect.value = firstLoad ? state.models[0].id : selected;
+  updateModelUI();
+}
+
+// Built-in models are ONNX, so other engines need a custom model file; opencv needs no model.
+function updateModelUI() {
+  const onnx = els.engine.value === 'onnx';
+  els.modelSection.hidden = els.engine.value === 'opencv';
+  for (const opt of els.modelSelect.options) opt.disabled = !onnx && opt.value !== 'custom';
+  if (!onnx) els.modelSelect.value = 'custom';
+
+  const model = state.models.find((m) => m.id === els.modelSelect.value);
+  els.customModel.hidden = Boolean(model);
+  els.modelHint.textContent = model
+    ? `${model.downloaded ? 'Downloaded' : `Downloads ${model.sizeMB} MB on first use`} · CC-BY-NC-SA-4.0 (non-commercial)`
+    : '';
+}
+
+function showProgress(info) {
+  els.progress.value = info.fraction;
+  const percent = Math.round(info.fraction * 100);
+  setStatus(info.phase === 'download'
+    ? `Downloading ${info.label} (${info.sizeMB} MB)... ${percent}%`
+    : `Upscaling... ${percent}%`);
+}
+
 async function processImage() {
   if (!state.imagePath) {
     setStatus('Please select an image first');
@@ -74,12 +111,15 @@ async function processImage() {
 
   state.processing = true;
   els.process.disabled = true;
+  els.progress.removeAttribute('value'); // indeterminate until the first progress report
   els.progress.hidden = false;
   setStatus('Processing...');
 
+  const modelId = els.engine.value === 'onnx' && els.modelSelect.value !== 'custom' ? els.modelSelect.value : null;
   try {
     const result = await window.sr.process({
       inputPath: state.imagePath,
+      modelId,
       modelPath: els.model.value,
       engine: els.engine.value,
       mode: els.mode.value,
@@ -91,13 +131,15 @@ async function processImage() {
     await showImage(els.resultImg, result.outputPath);
     els.resultSize.textContent = `(${els.resultImg.naturalWidth}×${els.resultImg.naturalHeight})`;
     els.save.disabled = false;
-    setStatus(`Processing completed successfully! Saved to ${basename(result.outputPath)}`);
+    const notes = result.notes.length ? ` (${result.notes.join('; ')})` : '';
+    setStatus(`Processing completed successfully! Saved to ${basename(result.outputPath)}${notes}`);
   } catch (err) {
     setStatus(`Processing failed: ${err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`);
   } finally {
     state.processing = false;
     els.process.disabled = false;
     els.progress.hidden = true;
+    if (modelId) refreshModels();
   }
 }
 
@@ -134,6 +176,8 @@ els.scale.addEventListener('change', () => {
   els.customSize.hidden = els.scale.value !== 'custom';
 });
 
+els.engine.addEventListener('change', updateModelUI);
+els.modelSelect.addEventListener('change', updateModelUI);
 els.process.addEventListener('click', processImage);
 els.save.addEventListener('click', saveResult);
 els.clear.addEventListener('click', clearAll);
@@ -152,3 +196,7 @@ document.addEventListener('drop', (e) => {
   const file = e.dataTransfer.files[0];
   if (file) loadImage(window.sr.pathForFile(file));
 });
+
+window.sr.onProgress(showProgress);
+if (window.sr.platform === 'darwin') els.mode.value = 'mps';
+refreshModels();

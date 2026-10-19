@@ -27,10 +27,10 @@ A powerful, cross-platform application for AI-powered image super-resolution wit
 - **Aspect Ratio**: Maintain proportions with single dimension input
 
 ### 🎯 **Model Support**
-- **ONNX Models**: `.onnx` files (Real-ESRGAN, ESRGAN variants)
+- **4x-UltraSharpV2** (default) and **UltraSharpV2 Lite**: built into the GUI and downloaded on first use (see [README_GUI.md](README_GUI.md#model-files))
+- **ONNX Models**: `.onnx` files, run with ONNX Runtime
 - **TensorFlow**: `.pb` SavedModel format
 - **TensorFlow Lite**: `.tflite` optimized models
-- **Real-ESRGAN**: State-of-the-art photo enhancement
 
 ## 🚀 Quick Start
 

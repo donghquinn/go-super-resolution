@@ -42,16 +42,23 @@ A cross-platform GUI application for AI-powered image super-resolution with drag
 ## Installation
 
 The desktop app is an **Electron** frontend (`electron/`) that runs a headless Go/OpenCV
-backend (`sr-backend.go` + `types.go`) for each job.
+backend (`sr-backend.go`, `types.go`, `onnx_engine.go`) for each job. The `onnx` engine runs
+models with [ONNX Runtime](https://onnxruntime.ai/).
 
 ### Build from Source
 
 1. **Prerequisites**:
    ```bash
    # Go (1.23 or later), Node.js (20 or later)
-   # OpenCV: macOS: brew install opencv pkg-config
-   #         Ubuntu: sudo apt-get install libopencv-dev pkg-config
+   # OpenCV 4 (gocv does not support OpenCV 5) and ONNX Runtime:
+   #   macOS:  brew install opencv@4 pkg-config onnxruntime
+   #           export PKG_CONFIG_PATH="$(brew --prefix opencv@4)/lib/pkgconfig"
+   #   Ubuntu: sudo apt-get install libopencv-dev pkg-config
+   #           + ONNX Runtime from https://github.com/microsoft/onnxruntime/releases
    ```
+
+   The backend looks for the ONNX Runtime library next to `sr-backend`, then in the usual
+   system locations. Set `SR_ONNXRUNTIME_LIB=/path/to/libonnxruntime.{dylib,so}` to override.
 
 2. **Run in development** (builds the Go backend into `electron/bin/` and launches Electron):
    ```bash
@@ -116,19 +123,28 @@ backend (`sr-backend.go` + `types.go`) for each job.
 
 ## Model Files
 
-### Where to Get Models
+### Built-in Models
 
-1. **Real-ESRGAN**: 
-   - GitHub: https://github.com/xinntao/Real-ESRGAN
-   - HuggingFace: https://huggingface.co/models?search=esrgan
+The **Model** menu offers two [4x-UltraSharpV2](https://huggingface.co/Kim2091/UltraSharpV2)
+models by Kim2091 (May 2025). They are downloaded on first use: into `models/` in development,
+or the app's user-data folder when packaged. To fetch them ahead of time, run
+`python3 download_model.py`.
 
-2. **ESRGAN ONNX Models**:
-   - ONNX Model Zoo: https://github.com/onnx/models
-   - Convert PyTorch models to ONNX
+| Model | Architecture | Size | Notes |
+|-------|--------------|------|-------|
+| **UltraSharpV2** | DAT2 transformer | 52 MB | Best quality. Always runs on CPU in `mps` mode (slower with CoreML) |
+| **UltraSharpV2 Lite** | RealPLKSR CNN | 30 MB | ~4x faster on CPU, much faster with CoreML (`mps`) |
 
-3. **TensorFlow Models**:
-   - TensorFlow Hub: https://tfhub.dev/
-   - Convert to TensorFlow Lite for mobile
+Both are licensed **CC-BY-NC-SA-4.0** (non-commercial use only).
+
+Both models upscale 4x natively. For 2x, 8x, or custom sizes, the 4x result is resized with
+area or cubic interpolation. Images are processed in 256×256 tiles with 32 px overlap, so large
+images don't run out of memory.
+
+### Custom Models
+
+Pick **Custom file…** to use any ONNX image-to-image SR model with an `input`/`output` tensor
+(NCHW, RGB, values 0–1). Its scale factor is detected automatically.
 
 ### Model Formats
 

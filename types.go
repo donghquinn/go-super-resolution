@@ -39,6 +39,9 @@ type Config struct {
 
 type SuperResolutionProcessor struct {
 	config Config
+
+	// OnProgress, if set, is called with the completed fraction (0-1) during model inference.
+	OnProgress func(float64)
 }
 
 func NewSuperResolutionProcessor(config Config) (*SuperResolutionProcessor, error) {
@@ -109,30 +112,23 @@ func (p *SuperResolutionProcessor) ProcessImage() error {
 	return nil
 }
 
-func (p *SuperResolutionProcessor) processWithOpenCV(img gocv.Mat) gocv.Mat {
-	// Calculate target size
-	var newSize image.Point
-	if p.config.TargetWidth > 0 || p.config.TargetHeight > 0 {
-		// Use specific dimensions
-		width := p.config.TargetWidth
-		height := p.config.TargetHeight
-		
-		// If only one dimension is specified, calculate the other maintaining aspect ratio
-		if width == 0 {
-			aspectRatio := float64(img.Cols()) / float64(img.Rows())
-			width = int(float64(height) * aspectRatio)
-		}
-		if height == 0 {
-			aspectRatio := float64(img.Rows()) / float64(img.Cols())
-			height = int(float64(width) * aspectRatio)
-		}
-		
-		newSize = image.Pt(width, height)
-	} else {
-		// Use scale factor
-		newSize = image.Pt(img.Cols()*p.config.ScaleFactor, img.Rows()*p.config.ScaleFactor)
+// targetSize returns the requested output size for img: explicit dimensions (keeping the
+// aspect ratio when only one is given) or the scale factor.
+func (p *SuperResolutionProcessor) targetSize(img gocv.Mat) image.Point {
+	width, height := p.config.TargetWidth, p.config.TargetHeight
+	if width <= 0 && height <= 0 {
+		return image.Pt(img.Cols()*p.config.ScaleFactor, img.Rows()*p.config.ScaleFactor)
 	}
-	
+	if width <= 0 {
+		width = int(float64(height) * float64(img.Cols()) / float64(img.Rows()))
+	}
+	if height <= 0 {
+		height = int(float64(width) * float64(img.Rows()) / float64(img.Cols()))
+	}
+	return image.Pt(width, height)
+}
+
+func (p *SuperResolutionProcessor) processWithOpenCV(img gocv.Mat) gocv.Mat {
 	result := gocv.NewMat()
 	
 	// Use different interpolation based on mode
@@ -146,14 +142,22 @@ func (p *SuperResolutionProcessor) processWithOpenCV(img gocv.Mat) gocv.Mat {
 		interpolation = gocv.InterpolationCubic
 	}
 	
-	gocv.Resize(img, &result, newSize, 0, 0, interpolation)
+	gocv.Resize(img, &result, p.targetSize(img), 0, 0, interpolation)
 	return result
 }
 
+// processWithONNX upscales with the model at its native scale, then resizes to the requested size.
 func (p *SuperResolutionProcessor) processWithONNX(img gocv.Mat) (gocv.Mat, error) {
-	// For demo purposes, just do OpenCV upscaling
-	// In real implementation, this would use ONNX inference
-	return p.processWithOpenCV(img), nil
+	upscaled, err := upscaleWithONNX(img, p.config.ModelPath, p.config.Mode, p.OnProgress)
+	if err != nil {
+		return gocv.Mat{}, err
+	}
+	size := p.targetSize(img)
+	if upscaled.Cols() == size.X && upscaled.Rows() == size.Y {
+		return upscaled, nil
+	}
+	defer upscaled.Close()
+	return resizeTo(upscaled, size), nil
 }
 
 func (p *SuperResolutionProcessor) processWithTensorFlow(img gocv.Mat) (gocv.Mat, error) {
