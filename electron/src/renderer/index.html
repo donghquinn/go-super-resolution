@@ -29,9 +29,10 @@
       </label>
       <label class="row">Mode
         <select id="mode">
-          <option value="cpu" selected>cpu</option>
-          <option value="gpu">gpu</option>
-          <option value="mps">mps</option>
+          <option value="auto" selected>Auto (fastest available)</option>
+          <option value="gpu">GPU (CUDA)</option>
+          <option value="mps">Apple GPU (MPS / CoreML)</option>
+          <option value="cpu">CPU</option>
         </select>
       </label>
       <label class="row">Scale

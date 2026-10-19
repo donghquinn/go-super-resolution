@@ -42,7 +42,7 @@ A cross-platform GUI application for AI-powered image super-resolution with drag
 ## Installation
 
 The desktop app is an **Electron** frontend (`electron/`) that runs a headless Go/OpenCV
-backend (`sr-backend.go`, `types.go`, `onnx_engine.go`) for each job. The `onnx` engine runs
+backend (`sr-backend.go`, `types.go`, `onnx_engine.go`, `devices.go`) for each job. The `onnx` engine runs
 models with [ONNX Runtime](https://onnxruntime.ai/).
 
 ### Build from Source
@@ -108,9 +108,27 @@ models with [ONNX Runtime](https://onnxruntime.ai/).
 
 | Mode | Description | Availability |
 |------|-------------|--------------|
-| **CPU** | CPU-only processing | All platforms |
-| **GPU** | CUDA GPU acceleration | NVIDIA GPUs |
-| **MPS** | Metal Performance Shaders | macOS only |
+| **Auto** (default) | Fastest available device: CUDA, then Apple GPU, then CPU | All platforms |
+| **GPU (CUDA)** | NVIDIA GPU via ONNX Runtime's CUDA provider | Windows/Linux with CUDA set up (see below) |
+| **Apple GPU (MPS / CoreML)** | Apple GPU and Neural Engine via ONNX Runtime's CoreML provider | macOS |
+| **CPU** | CPU only | All platforms |
+
+The app checks which devices actually work when it starts (`sr-backend -devices`), and disables
+modes that aren't available. The status bar shows the device each job ran on. If a device fails
+for a model, either when the session is created or on the first tile, the job falls back to the
+next device instead of failing, and the status bar says why.
+
+In **Auto** mode on macOS, transformer models with attention layers run on CPU instead of
+CoreML. This covers DAT/DAT2 (UltraSharpV2, RealWebPhoto), HAT and SwinIR, and is detected from
+the model itself. These models measured 2–10x *slower* on CoreML than on CPU. Convolutional
+models such as RealPLKSR measured 5–9x faster on CoreML. Choosing **Apple GPU** explicitly
+always uses CoreML.
+
+**CUDA setup:** Homebrew's and the default ONNX Runtime downloads are CPU builds (plus CoreML on
+macOS). For NVIDIA GPUs, install the GPU build of ONNX Runtime 1.31 (`onnxruntime-gpu`) with
+CUDA 12 and cuDNN 9. Point the backend at it with
+`SR_ONNXRUNTIME_LIB=/path/to/libonnxruntime.so`, or place the library next to `sr-backend`.
+`sr-backend -devices` shows whether CUDA is usable and, if not, why.
 
 ### Scale Options
 
@@ -141,9 +159,9 @@ Catalog (every model checked against ONNX Runtime with this backend):
 | **RealPLKSR 2x** | 2x | RealPLKSR | 30 MB | MIT | Native 2x, faithful (non-GAN) |
 | **RealPLKSR 4x** | 4x | RealPLKSR | 30 MB | MIT | Faithful (non-GAN) 4x |
 
-CC-BY-NC-SA models are for non-commercial use only. In `mps` mode, RealPLKSR models run on
-CoreML (5–9x faster than CPU on Apple Silicon). DAT2 models always run on CPU, because they are
-slower with CoreML.
+CC-BY-NC-SA models are for non-commercial use only. On Apple Silicon in Auto mode, RealPLKSR
+models run on CoreML (5–9x faster than CPU), and DAT2 models run on CPU (see
+[Mode Options](#mode-options)).
 
 `python3 download_model.py` pre-downloads the two UltraSharpV2 models.
 
@@ -229,7 +247,8 @@ electron/bin/sr-backend -inspect -model path/to/model.onnx
 - `electron/src/renderer/` - UI (HTML/CSS/JS)
 - `electron/src/models.js` - model catalog, downloads, URL import
 - `sr-backend.go` - CLI that processes one image (or `-inspect`s a model) and prints a JSON result line
-- `onnx_engine.go` - tiled ONNX Runtime inference (`go test sr-backend.go types.go onnx_engine.go onnx_engine_test.go`)
+- `devices.go` - execution device selection (CUDA / CoreML / CPU) and `-devices` probing
+- `onnx_engine.go` - tiled ONNX Runtime inference (`go test sr-backend.go types.go onnx_engine.go devices.go onnx_engine_test.go`)
 
 ### Packaging
 

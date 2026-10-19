@@ -6,7 +6,6 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 
 // Verified with sr-backend (tiling, precision and output checked against ONNX Runtime in Python).
-// coreml: whether CoreML ("mps" mode) speeds the model up; DAT2 models are slower with CoreML.
 const CATALOG = [
   {
     id: 'ultrasharp-v2',
@@ -19,7 +18,6 @@ const CATALOG = [
     author: 'Kim2091',
     file: '4x-UltraSharpV2_fp32_op17.onnx',
     url: 'https://huggingface.co/Kim2091/UltraSharpV2/resolve/main/4x-UltraSharpV2_fp32_op17.onnx',
-    coreml: false,
   },
   {
     id: 'ultrasharp-v2-lite',
@@ -32,7 +30,6 @@ const CATALOG = [
     author: 'Kim2091',
     file: '4x-UltraSharpV2_Lite_fp32_op17.onnx',
     url: 'https://huggingface.co/Kim2091/UltraSharpV2/resolve/main/4x-UltraSharpV2_Lite_fp32_op17.onnx',
-    coreml: true,
   },
   {
     id: 'realwebphoto-v4-dat2',
@@ -45,7 +42,6 @@ const CATALOG = [
     author: 'Phhofm',
     file: '4xRealWebPhoto_v4_dat2_fp32_opset17.onnx',
     url: 'https://github.com/Phhofm/models/releases/download/4xRealWebPhoto_v4_dat2/4xRealWebPhoto_v4_dat2_fp32_opset17.onnx',
-    coreml: false,
   },
   {
     id: 'nomos2-realplksr',
@@ -58,7 +54,6 @@ const CATALOG = [
     author: 'Phhofm',
     file: '4xNomos2_realplksr_dysample_256_fp32_fullyoptimized.onnx',
     url: 'https://github.com/Phhofm/models/releases/download/4xNomos2_realplksr_dysample/4xNomos2_realplksr_dysample_256_fp32_fullyoptimized.onnx',
-    coreml: true,
   },
   {
     id: 'realplksr-x2',
@@ -71,7 +66,6 @@ const CATALOG = [
     author: 'darktable',
     file: 'realplksr_x2.onnx',
     url: 'https://huggingface.co/darktable-org/upscale-realplksr-onnx/resolve/main/onnx/model_x2.onnx',
-    coreml: true,
   },
   {
     id: 'realplksr-x4',
@@ -84,7 +78,6 @@ const CATALOG = [
     author: 'darktable',
     file: 'realplksr_x4.onnx',
     url: 'https://huggingface.co/darktable-org/upscale-realplksr-onnx/resolve/main/onnx/model_x4.onnx',
-    coreml: true,
   },
 ];
 
@@ -187,7 +180,7 @@ class ModelStore {
     if (entry) return entry;
     const file = String(id).startsWith(USER_PREFIX) ? id.slice(USER_PREFIX.length) : null;
     if (file && (await this.files()).includes(file)) {
-      return { id, file, label: file.replace(/\.onnx$/i, ''), coreml: true };
+      return { id, file, label: file.replace(/\.onnx$/i, '') };
     }
     return null;
   }

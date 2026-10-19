@@ -54,6 +54,11 @@ func onnxRuntimeLibrary() string {
 // onnxUpscaler runs one image-to-image SR model on fixed-size tiles. It accepts models with any
 // tensor names, float32 or float16 precision, and dynamic or fixed input sizes.
 type onnxUpscaler struct {
+	model        []byte   // ONNX model with its input shape pinned to the tile size
+	chain        []Device // devices still to try if the current one fails
+	device       Device   // device the session runs on
+	warnings     []string // why faster devices were skipped
+	succeeded    bool     // a run has completed on the current device
 	session      *ort.DynamicAdvancedSession
 	inputName    string
 	outputName   string
@@ -78,12 +83,18 @@ type ModelInfo struct {
 	TileHeight int    `json:"tileHeight"`
 	FixedSize  bool   `json:"fixedSize"`
 	Scale      int    `json:"scale"`
+	Device     Device `json:"device"`
+}
+
+// onnxRun reports how an upscale ran.
+type onnxRun struct {
+	Device   Device
+	Warnings []string
 }
 
 func newONNXUpscaler(modelPath string, mode InferenceMode) (*onnxUpscaler, error) {
-	ort.SetSharedLibraryPath(onnxRuntimeLibrary())
-	if err := ort.InitializeEnvironment(); err != nil {
-		return nil, fmt.Errorf("failed to load ONNX Runtime (set SR_ONNXRUNTIME_LIB to libonnxruntime): %v", err)
+	if err := initONNXRuntime(); err != nil {
+		return nil, err
 	}
 	u := &onnxUpscaler{}
 	if err := u.init(modelPath, mode); err != nil {
@@ -123,40 +134,11 @@ func (u *onnxUpscaler) init(modelPath string, mode InferenceMode) error {
 	if dims[2] > 0 && dims[3] > 0 {
 		u.tileH, u.tileW, u.fixedSize = int(dims[2]), int(dims[3]), true
 	}
+	u.chain = deviceChain(mode, hasAttention(model))
 	// Tiles always have the same shape; pinning it lets ORT/CoreML plan a static graph.
+	u.model = model
 	if fixed, err := withStaticInputShape(model, []int64{1, 3, int64(u.tileH), int64(u.tileW)}); err == nil {
-		model = fixed
-	}
-
-	options, err := ort.NewSessionOptions()
-	if err != nil {
-		return err
-	}
-	defer options.Destroy()
-
-	// Hardware providers are best effort: fall back to CPU if the provider isn't available.
-	switch mode {
-	case ModeGPU:
-		if cuda, err := ort.NewCUDAProviderOptions(); err != nil {
-			warnf("CUDA unavailable, using CPU: %v", err)
-		} else {
-			if err := options.AppendExecutionProviderCUDA(cuda); err != nil {
-				warnf("CUDA unavailable, using CPU: %v", err)
-			}
-			cuda.Destroy()
-		}
-	case ModeMPS:
-		if err := options.AppendExecutionProviderCoreMLV2(map[string]string{
-			"ModelFormat":    "MLProgram",
-			"MLComputeUnits": "ALL",
-		}); err != nil {
-			warnf("CoreML unavailable, using CPU: %v", err)
-		}
-	}
-
-	u.session, err = ort.NewDynamicAdvancedSessionWithONNXData(model, []string{in.Name}, []string{out.Name}, options)
-	if err != nil {
-		return err
+		u.model = fixed
 	}
 
 	shape := ort.NewShape(1, 3, int64(u.tileH), int64(u.tileW))
@@ -167,11 +149,67 @@ func (u *onnxUpscaler) init(modelPath string, mode InferenceMode) error {
 	} else {
 		u.inTensor, err = ort.NewTensor(shape, u.input)
 	}
+	if err != nil {
+		return err
+	}
+	return u.openSession()
+}
+
+// openSession creates a session on the first device in u.chain that works.
+func (u *onnxUpscaler) openSession() error {
+	err := fmt.Errorf("no execution device to try")
+	for len(u.chain) > 0 {
+		d := u.chain[0]
+		u.chain = u.chain[1:]
+		var options *ort.SessionOptions
+		if options, err = sessionOptionsFor(d); err == nil {
+			u.session, err = ort.NewDynamicAdvancedSessionWithONNXData(u.model, []string{u.inputName}, []string{u.outputName}, options)
+			options.Destroy()
+		}
+		if err == nil {
+			u.device = d
+			return nil
+		}
+		u.skipDevice(d, err)
+	}
 	return err
 }
 
-// run upscales u.input into u.output, detecting the model's scale on the first call.
+func (u *onnxUpscaler) skipDevice(d Device, err error) {
+	if len(u.chain) == 0 {
+		return // nothing left to fall back to; the caller reports err itself
+	}
+	msg := fmt.Sprintf("%s unavailable, using %s: %s", deviceNames[d], deviceNames[u.chain[0]], firstLine(err.Error()))
+	warnf("%s", msg)
+	u.warnings = append(u.warnings, msg)
+}
+
+// run upscales u.input into u.output. If the first run fails on an accelerator, it retries on
+// the next device in the chain (some providers only reject a model once it runs).
 func (u *onnxUpscaler) run() error {
+	err := u.runOnce()
+	if err == nil {
+		u.succeeded = true
+		return nil
+	}
+	if u.succeeded || len(u.chain) == 0 {
+		return err
+	}
+	u.skipDevice(u.device, err)
+	u.session.Destroy()
+	u.session = nil
+	if u.outHalf != nil {
+		u.outHalf.Destroy()
+		u.outHalf, u.scale = nil, 0
+	}
+	if err := u.openSession(); err != nil {
+		return err
+	}
+	return u.run()
+}
+
+// runOnce upscales u.input into u.output, detecting the model's scale on the first call.
+func (u *onnxUpscaler) runOnce() error {
 	if !u.half {
 		outputs := []ort.Value{nil}
 		if err := u.session.Run([]ort.Value{u.inTensor}, outputs); err != nil {
@@ -267,6 +305,7 @@ func inspectONNXModel(modelPath string, mode InferenceMode) (*ModelInfo, error) 
 		TileHeight: u.tileH,
 		FixedSize:  u.fixedSize,
 		Scale:      u.scale,
+		Device:     u.device,
 	}
 	if u.half {
 		info.Precision = "float16"
@@ -353,17 +392,17 @@ func hasField(msg []byte, num protowire.Number) bool {
 
 // upscaleWithONNX runs the model over img tile by tile and returns the result at the model's
 // native scale. progress (may be nil) is called with the completed fraction after each tile.
-func upscaleWithONNX(img gocv.Mat, modelPath string, mode InferenceMode, progress func(float64)) (gocv.Mat, error) {
+func upscaleWithONNX(img gocv.Mat, modelPath string, mode InferenceMode, progress func(float64)) (gocv.Mat, *onnxRun, error) {
 	u, err := newONNXUpscaler(modelPath, mode)
 	if err != nil {
-		return gocv.Mat{}, err
+		return gocv.Mat{}, nil, err
 	}
 	defer u.Close()
 
 	width, height := img.Cols(), img.Rows()
 	src, err := img.DataPtrUint8() // BGR, row-major
 	if err != nil {
-		return gocv.Mat{}, err
+		return gocv.Mat{}, nil, err
 	}
 
 	tileW, tileH := u.tileW, u.tileH
@@ -390,7 +429,7 @@ func upscaleWithONNX(img gocv.Mat, modelPath string, mode InferenceMode, progres
 			}
 
 			if err := u.run(); err != nil {
-				return gocv.Mat{}, err
+				return gocv.Mat{}, nil, err
 			}
 			scale := u.scale
 			if dst == nil {
@@ -419,7 +458,8 @@ func upscaleWithONNX(img gocv.Mat, modelPath string, mode InferenceMode, progres
 		}
 	}
 
-	return gocv.NewMatFromBytes(height*u.scale, width*u.scale, gocv.MatTypeCV8UC3, dst)
+	result, err := gocv.NewMatFromBytes(height*u.scale, width*u.scale, gocv.MatTypeCV8UC3, dst)
+	return result, &onnxRun{Device: u.device, Warnings: u.warnings}, err
 }
 
 // reflectIndex maps i into [0, n) by mirroring at the edges (OpenCV's BORDER_REFLECT_101).

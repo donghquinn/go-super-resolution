@@ -15,10 +15,11 @@ type UpscaleEngine string
 
 const (
 	// Inference modes
-	ModeCPU InferenceMode = "cpu"
-	ModeGPU InferenceMode = "gpu"
-	ModeMPS InferenceMode = "mps"
-	
+	ModeAuto InferenceMode = "auto" // fastest available: CUDA, then CoreML (macOS), then CPU
+	ModeCPU  InferenceMode = "cpu"
+	ModeGPU  InferenceMode = "gpu" // CUDA
+	ModeMPS  InferenceMode = "mps" // Apple GPU / Neural Engine via CoreML
+
 	// Upscale engines
 	EngineOpenCV     UpscaleEngine = "opencv"
 	EngineONNX       UpscaleEngine = "onnx"
@@ -42,6 +43,11 @@ type SuperResolutionProcessor struct {
 
 	// OnProgress, if set, is called with the completed fraction (0-1) during model inference.
 	OnProgress func(float64)
+
+	// Set by ProcessImage for model engines: the device that ran the model, and why any
+	// faster devices were skipped.
+	Device   Device
+	Warnings []string
 }
 
 func NewSuperResolutionProcessor(config Config) (*SuperResolutionProcessor, error) {
@@ -130,28 +136,24 @@ func (p *SuperResolutionProcessor) targetSize(img gocv.Mat) image.Point {
 
 func (p *SuperResolutionProcessor) processWithOpenCV(img gocv.Mat) gocv.Mat {
 	result := gocv.NewMat()
-	
+
 	// Use different interpolation based on mode
-	var interpolation gocv.InterpolationFlags
-	switch p.config.Mode {
-	case ModeCPU:
-		interpolation = gocv.InterpolationCubic
-	case ModeGPU:
+	interpolation := gocv.InterpolationCubic
+	if p.config.Mode == ModeGPU {
 		interpolation = gocv.InterpolationLanczos4
-	case ModeMPS:
-		interpolation = gocv.InterpolationCubic
 	}
-	
+
 	gocv.Resize(img, &result, p.targetSize(img), 0, 0, interpolation)
 	return result
 }
 
 // processWithONNX upscales with the model at its native scale, then resizes to the requested size.
 func (p *SuperResolutionProcessor) processWithONNX(img gocv.Mat) (gocv.Mat, error) {
-	upscaled, err := upscaleWithONNX(img, p.config.ModelPath, p.config.Mode, p.OnProgress)
+	upscaled, run, err := upscaleWithONNX(img, p.config.ModelPath, p.config.Mode, p.OnProgress)
 	if err != nil {
 		return gocv.Mat{}, err
 	}
+	p.Device, p.Warnings = run.Device, run.Warnings
 	size := p.targetSize(img)
 	if upscaled.Cols() == size.X && upscaled.Rows() == size.Y {
 		return upscaled, nil

@@ -1,6 +1,6 @@
 package main
 
-// Run with: go test sr-backend.go types.go onnx_engine.go onnx_engine_test.go
+// Run with: go test sr-backend.go types.go onnx_engine.go devices.go onnx_engine_test.go
 
 import (
 	"math"
@@ -104,5 +104,40 @@ func TestWithStaticInputShape(t *testing.T) {
 
 	if _, err := withStaticInputShape([]byte{0xff}, dims); err == nil {
 		t.Error("expected an error for malformed protobuf")
+	}
+}
+
+func TestDeviceChain(t *testing.T) {
+	last := func(chain []Device) Device { return chain[len(chain)-1] }
+	for _, mode := range []InferenceMode{ModeAuto, ModeCPU, ModeGPU, ModeMPS} {
+		if got := last(deviceChain(mode, false)); got != DeviceCPU {
+			t.Errorf("%s: chain must end with CPU, got %s", mode, got)
+		}
+	}
+	if got := deviceChain(ModeGPU, false)[0]; got != DeviceCUDA {
+		t.Errorf("gpu mode starts with %s, want cuda", got)
+	}
+	if got := deviceChain(ModeMPS, true)[0]; got != DeviceCoreML {
+		t.Errorf("mps mode starts with %s, want coreml (explicit choice beats the attention heuristic)", got)
+	}
+	for _, d := range deviceChain(ModeAuto, true) {
+		if d == DeviceCoreML {
+			t.Error("auto mode must skip CoreML for attention models")
+		}
+	}
+}
+
+func TestHasAttention(t *testing.T) {
+	if hasAttention(probeModel()) {
+		t.Error("Relu-only probe model reported as attention model")
+	}
+	field := func(msg []byte, num protowire.Number, value string) []byte {
+		return protowire.AppendString(protowire.AppendTag(msg, num, protowire.BytesType), value)
+	}
+	node := field(field(field(nil, 1, "x"), 2, "y"), 4, "Softmax")
+	graph := protowire.AppendBytes(protowire.AppendTag(nil, 1, protowire.BytesType), node)
+	model := protowire.AppendBytes(protowire.AppendTag(nil, 7, protowire.BytesType), graph)
+	if !hasAttention(model) {
+		t.Error("Softmax model not detected as attention model")
 	}
 }

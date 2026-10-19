@@ -6,7 +6,7 @@
   "main": "src/main.js",
   "license": "MIT",
   "scripts": {
-    "build:backend": "cd .. && go build -o electron/bin/sr-backend sr-backend.go types.go onnx_engine.go",
+    "build:backend": "cd .. && go build -o electron/bin/sr-backend sr-backend.go types.go onnx_engine.go devices.go",
     "start": "electron .",
     "dev": "npm run build:backend && electron .",
     "dist": "npm run build:backend && electron-builder"

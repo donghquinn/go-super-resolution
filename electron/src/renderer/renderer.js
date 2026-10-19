@@ -1,4 +1,6 @@
 const IMAGE_EXT = /\.(jpe?g|png|bmp|tiff?)$/i;
+const DEVICE_NAMES = { cuda: 'CUDA GPU', coreml: 'Apple GPU (CoreML)', cpu: 'CPU' };
+const MODE_DEVICES = { gpu: 'cuda', mps: 'coreml' };
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -76,6 +78,31 @@ async function loadImage(filePath) {
   const { naturalWidth: w, naturalHeight: h } = els.originalImg;
   els.originalSize.textContent = `(${w}×${h})`;
   setStatus(`Loaded: ${basename(filePath)} (${w}x${h})`);
+}
+
+// Marks GPU modes this machine can't use and describes what Auto will pick.
+async function refreshDevices() {
+  let devices;
+  try {
+    devices = await window.sr.listDevices();
+  } catch (err) {
+    els.mode.title = `Could not detect devices: ${errorText(err)}`;
+    return;
+  }
+  const byId = Object.fromEntries(devices.map((d) => [d.id, d]));
+  for (const opt of els.mode.options) {
+    const device = byId[MODE_DEVICES[opt.value]];
+    if (device && !device.available) {
+      opt.disabled = true;
+      opt.textContent += ' (not available)';
+      opt.title = device.reason;
+    }
+  }
+  const accelerators = devices.filter((d) => d.available && d.id !== 'cpu').map((d) => DEVICE_NAMES[d.id]);
+  els.mode.options[0].title = accelerators.length
+    ? `Uses ${accelerators.join(' or ')} when it's faster for the model, otherwise CPU`
+    : 'No GPU acceleration available: runs on CPU';
+  if (els.mode.selectedOptions[0]?.disabled) els.mode.value = 'auto';
 }
 
 // (Re)builds the model menu: downloaded models first, then ones that download on first use.
@@ -281,8 +308,9 @@ async function processImage() {
     await showImage(els.resultImg, result.outputPath);
     els.resultSize.textContent = `(${els.resultImg.naturalWidth}×${els.resultImg.naturalHeight})`;
     els.save.disabled = false;
-    const notes = result.notes.length ? ` (${result.notes.join('; ')})` : '';
-    setStatus(`Processing completed successfully! Saved to ${basename(result.outputPath)}${notes}`);
+    const device = result.device ? ` on ${DEVICE_NAMES[result.device] || result.device}` : '';
+    const warnings = result.warnings?.length ? ` (${result.warnings.join('; ')})` : '';
+    setStatus(`Processing completed successfully${device}! Saved to ${basename(result.outputPath)}${warnings}`);
   } catch (err) {
     setStatus(`Processing failed: ${errorText(err)}`);
   } finally {
@@ -355,5 +383,5 @@ els.manageModels.addEventListener('click', () => {
 $('close-models').addEventListener('click', () => els.modelsDialog.close());
 $('open-models-folder').addEventListener('click', () => window.sr.openModelsFolder());
 els.urlForm.addEventListener('submit', addModelFromUrl);
-if (window.sr.platform === 'darwin') els.mode.value = 'mps';
+refreshDevices();
 refreshModels();

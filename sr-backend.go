@@ -3,9 +3,10 @@ package main
 // Headless backend used by the Electron desktop app (see electron/).
 // Runs a single super-resolution job and reports the result as one JSON line on stdout.
 // While running, "progress <0-1>" lines are written to stderr.
-// With -inspect, it instead checks that -model is a usable ONNX model and reports its details.
+// With -inspect, it instead checks that -model is a usable ONNX model and reports its details;
+// with -devices, it reports which execution devices (CUDA, CoreML, CPU) can be used.
 //
-// Build: go build -o sr-backend sr-backend.go types.go onnx_engine.go
+// Build: go build -o sr-backend sr-backend.go types.go onnx_engine.go devices.go
 
 import (
 	"encoding/json"
@@ -17,12 +18,15 @@ import (
 )
 
 type backendResult struct {
-	OK         bool       `json:"ok"`
-	OutputPath string     `json:"outputPath,omitempty"`
-	Width      int        `json:"width,omitempty"`
-	Height     int        `json:"height,omitempty"`
-	Model      *ModelInfo `json:"model,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	OK         bool           `json:"ok"`
+	OutputPath string         `json:"outputPath,omitempty"`
+	Width      int            `json:"width,omitempty"`
+	Height     int            `json:"height,omitempty"`
+	Device     Device         `json:"device,omitempty"`
+	Warnings   []string       `json:"warnings,omitempty"`
+	Model      *ModelInfo     `json:"model,omitempty"`
+	Devices    []DeviceStatus `json:"devices,omitempty"`
+	Error      string         `json:"error,omitempty"`
 }
 
 func main() {
@@ -30,14 +34,30 @@ func main() {
 		inputPath    = flag.String("input", "", "Input image path")
 		outputPath   = flag.String("output", "", "Output image path")
 		modelPath    = flag.String("model", "models/4x-UltraSharpV2_fp32_op17.onnx", "Model path")
-		mode         = flag.String("mode", "cpu", "Inference mode: cpu, gpu, mps")
+		mode         = flag.String("mode", "auto", "Inference mode: auto (fastest available), cpu, gpu (CUDA), mps (CoreML)")
 		engine       = flag.String("engine", "onnx", "Upscale engine: opencv, onnx, tensorflow, tflite")
 		scaleFactor  = flag.Int("scale", 4, "Scale factor")
 		targetWidth  = flag.Int("width", 0, "Target width (0 = use scale factor)")
 		targetHeight = flag.Int("height", 0, "Target height (0 = use scale factor)")
 		inspect      = flag.Bool("inspect", false, "Check the ONNX -model and print its details instead of processing")
+		devices      = flag.Bool("devices", false, "Print which execution devices are available")
 	)
 	flag.Parse()
+
+	switch InferenceMode(*mode) {
+	case ModeAuto, ModeCPU, ModeGPU, ModeMPS:
+	default:
+		fail(fmt.Errorf("invalid -mode %q (use auto, cpu, gpu or mps)", *mode))
+	}
+
+	if *devices {
+		statuses, err := probeDevices()
+		if err != nil {
+			fail(err)
+		}
+		emit(backendResult{OK: true, Devices: statuses})
+		return
+	}
 
 	if *inspect {
 		info, err := inspectONNXModel(*modelPath, InferenceMode(*mode))
@@ -74,7 +94,7 @@ func main() {
 		fail(fmt.Errorf("processing failed: %v", err))
 	}
 
-	result := backendResult{OK: true, OutputPath: config.OutputPath}
+	result := backendResult{OK: true, OutputPath: config.OutputPath, Device: processor.Device, Warnings: processor.Warnings}
 	if img := gocv.IMRead(config.OutputPath, gocv.IMReadColor); !img.Empty() {
 		result.Width, result.Height = img.Cols(), img.Rows()
 		img.Close()

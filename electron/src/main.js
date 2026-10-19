@@ -121,14 +121,7 @@ ipcMain.handle('open-models-folder', async () => {
 ipcMain.handle('process', async (e, opts) => {
   const model = opts.modelId ? await models.find(opts.modelId) : null;
   if (opts.modelId && !model) throw new Error('The selected model is no longer available');
-  let { mode } = opts;
-  const notes = [];
-
   const modelPath = model ? await models.ensure(model.id) : opts.modelPath;
-  if (model && mode === 'mps' && !model.coreml) {
-    mode = 'cpu';
-    notes.push('ran on CPU: this model is slower with CoreML');
-  }
 
   const custom = opts.scale === 'custom';
   const scaleLabel = custom ? 'Custom' : `${opts.scale}x`;
@@ -138,13 +131,23 @@ ipcMain.handle('process', async (e, opts) => {
     '-input', opts.inputPath,
     '-output', outputPath,
     '-model', modelPath,
-    '-mode', mode,
+    '-mode', opts.mode,
     '-engine', opts.engine,
     '-scale', String(custom ? 1 : opts.scale),
     '-width', String(custom ? opts.width || 0 : 0),
     '-height', String(custom ? opts.height || 0 : 0),
   ], (fraction) => e.sender.send('progress', { fraction }));
-  return { ...result, notes };
+  return result;
+});
+
+// Which execution devices (CUDA, CoreML, CPU) this machine can use; probed once.
+let devices;
+ipcMain.handle('list-devices', () => {
+  devices ??= runBackend(['-devices'], () => {}).then((r) => r.devices).catch((err) => {
+    devices = undefined; // retry next time, e.g. after ONNX Runtime is installed
+    throw err;
+  });
+  return devices;
 });
 
 app.whenReady().then(() => {
