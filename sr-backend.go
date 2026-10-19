@@ -3,6 +3,7 @@ package main
 // Headless backend used by the Electron desktop app (see electron/).
 // Runs a single super-resolution job and reports the result as one JSON line on stdout.
 // While running, "progress <0-1>" lines are written to stderr.
+// With -inspect, it instead checks that -model is a usable ONNX model and reports its details.
 //
 // Build: go build -o sr-backend sr-backend.go types.go onnx_engine.go
 
@@ -16,11 +17,12 @@ import (
 )
 
 type backendResult struct {
-	OK         bool   `json:"ok"`
-	OutputPath string `json:"outputPath,omitempty"`
-	Width      int    `json:"width,omitempty"`
-	Height     int    `json:"height,omitempty"`
-	Error      string `json:"error,omitempty"`
+	OK         bool       `json:"ok"`
+	OutputPath string     `json:"outputPath,omitempty"`
+	Width      int        `json:"width,omitempty"`
+	Height     int        `json:"height,omitempty"`
+	Model      *ModelInfo `json:"model,omitempty"`
+	Error      string     `json:"error,omitempty"`
 }
 
 func main() {
@@ -33,8 +35,18 @@ func main() {
 		scaleFactor  = flag.Int("scale", 4, "Scale factor")
 		targetWidth  = flag.Int("width", 0, "Target width (0 = use scale factor)")
 		targetHeight = flag.Int("height", 0, "Target height (0 = use scale factor)")
+		inspect      = flag.Bool("inspect", false, "Check the ONNX -model and print its details instead of processing")
 	)
 	flag.Parse()
+
+	if *inspect {
+		info, err := inspectONNXModel(*modelPath, InferenceMode(*mode))
+		if err != nil {
+			fail(err)
+		}
+		emit(backendResult{OK: true, Model: info})
+		return
+	}
 
 	if *inputPath == "" || *outputPath == "" {
 		fail(fmt.Errorf("both -input and -output are required"))

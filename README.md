@@ -27,7 +27,7 @@ A powerful, cross-platform application for AI-powered image super-resolution wit
 - **Aspect Ratio**: Maintain proportions with single dimension input
 
 ### 🎯 **Model Support**
-- **4x-UltraSharpV2** (default) and **UltraSharpV2 Lite**: built into the GUI and downloaded on first use (see [README_GUI.md](README_GUI.md#model-files))
+- **Model manager** in the GUI: download models from a catalog (UltraSharpV2, RealWebPhoto, RealPLKSR, …) or add any ONNX model from a URL (see [README_GUI.md](README_GUI.md#managing-models))
 - **ONNX Models**: `.onnx` files, run with ONNX Runtime
 - **TensorFlow**: `.pb` SavedModel format
 - **TensorFlow Lite**: `.tflite` optimized models

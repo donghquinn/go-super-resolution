@@ -1,11 +1,13 @@
 package main
 
 // ONNX Runtime inference for image-to-image super-resolution models
-// (e.g. 4x-UltraSharpV2): NCHW float32 RGB input in [0, 1], output scaled by the model's factor.
+// (e.g. 4x-UltraSharpV2): NCHW RGB input in [0, 1], output scaled by the model's factor.
 
 import (
+	"encoding/binary"
 	"fmt"
 	"image"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,8 +18,8 @@ import (
 )
 
 const (
-	onnxTileSize    = 256 // input tile edge fed to the model; every call uses this exact shape
-	onnxTileOverlap = 32  // context pixels on each side of a tile, discarded from the output
+	onnxTileSize    = 256 // tile edge for models that accept any input size
+	onnxTileOverlap = 32  // max context pixels on each side of a tile, discarded from the output
 )
 
 // onnxRuntimeLibrary finds the ONNX Runtime shared library: $SR_ONNXRUNTIME_LIB, next to the
@@ -49,15 +51,86 @@ func onnxRuntimeLibrary() string {
 	return name // let the OS loader search its default paths
 }
 
-func newONNXSession(modelPath string, mode InferenceMode) (*ort.DynamicAdvancedSession, error) {
+// onnxUpscaler runs one image-to-image SR model on fixed-size tiles. It accepts models with any
+// tensor names, float32 or float16 precision, and dynamic or fixed input sizes.
+type onnxUpscaler struct {
+	session      *ort.DynamicAdvancedSession
+	inputName    string
+	outputName   string
+	half         bool // model uses float16 tensors
+	fixedSize    bool // model only accepts one input size
+	tileW, tileH int  // input tile size: the model's fixed input size, or onnxTileSize
+	scale        int  // detected on the first run
+
+	input    []float32 // planar RGB tile, filled by the caller before run()
+	output   []float32 // planar RGB result of the last run()
+	inTensor ort.Value
+	inHalf   []byte
+	outHalf  *ort.CustomDataTensor
+}
+
+// ModelInfo describes a model as seen by the backend (see sr-backend -inspect).
+type ModelInfo struct {
+	Input      string `json:"input"`
+	Output     string `json:"output"`
+	Precision  string `json:"precision"`
+	TileWidth  int    `json:"tileWidth"`
+	TileHeight int    `json:"tileHeight"`
+	FixedSize  bool   `json:"fixedSize"`
+	Scale      int    `json:"scale"`
+}
+
+func newONNXUpscaler(modelPath string, mode InferenceMode) (*onnxUpscaler, error) {
 	ort.SetSharedLibraryPath(onnxRuntimeLibrary())
 	if err := ort.InitializeEnvironment(); err != nil {
 		return nil, fmt.Errorf("failed to load ONNX Runtime (set SR_ONNXRUNTIME_LIB to libonnxruntime): %v", err)
 	}
+	u := &onnxUpscaler{}
+	if err := u.init(modelPath, mode); err != nil {
+		u.Close()
+		return nil, err
+	}
+	return u, nil
+}
+
+func (u *onnxUpscaler) init(modelPath string, mode InferenceMode) error {
+	model, err := os.ReadFile(modelPath)
+	if err != nil {
+		return err
+	}
+	inputs, outputs, err := ort.GetInputOutputInfoWithONNXData(model)
+	if err != nil {
+		return fmt.Errorf("not a valid ONNX model: %v", err)
+	}
+	if len(inputs) != 1 || len(outputs) < 1 {
+		return fmt.Errorf("expected a model with 1 image input, got %d inputs and %d outputs", len(inputs), len(outputs))
+	}
+	in, out := inputs[0], outputs[0]
+	u.inputName, u.outputName = in.Name, out.Name
+	dims := in.Dimensions
+	if in.OrtValueType != ort.ONNXTypeTensor || len(dims) != 4 || (dims[1] != 3 && dims[1] > 0) {
+		return fmt.Errorf("expected an RGB image input [N, 3, H, W], got %s %v", in.Name, dims)
+	}
+	switch {
+	case in.DataType == ort.TensorElementDataTypeFloat && out.DataType == ort.TensorElementDataTypeFloat:
+	case in.DataType == ort.TensorElementDataTypeFloat16 && out.DataType == ort.TensorElementDataTypeFloat16:
+		u.half = true
+	default:
+		return fmt.Errorf("unsupported tensor types %s -> %s (need float32 or float16)", in.DataType, out.DataType)
+	}
+
+	u.tileW, u.tileH = onnxTileSize, onnxTileSize
+	if dims[2] > 0 && dims[3] > 0 {
+		u.tileH, u.tileW, u.fixedSize = int(dims[2]), int(dims[3]), true
+	}
+	// Tiles always have the same shape; pinning it lets ORT/CoreML plan a static graph.
+	if fixed, err := withStaticInputShape(model, []int64{1, 3, int64(u.tileH), int64(u.tileW)}); err == nil {
+		model = fixed
+	}
 
 	options, err := ort.NewSessionOptions()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer options.Destroy()
 
@@ -81,15 +154,124 @@ func newONNXSession(modelPath string, mode InferenceMode) (*ort.DynamicAdvancedS
 		}
 	}
 
-	model, err := os.ReadFile(modelPath)
+	u.session, err = ort.NewDynamicAdvancedSessionWithONNXData(model, []string{in.Name}, []string{out.Name}, options)
+	if err != nil {
+		return err
+	}
+
+	shape := ort.NewShape(1, 3, int64(u.tileH), int64(u.tileW))
+	u.input = make([]float32, 3*u.tileW*u.tileH)
+	if u.half {
+		u.inHalf = make([]byte, 2*len(u.input))
+		u.inTensor, err = ort.NewCustomDataTensor(shape, u.inHalf, ort.TensorElementDataTypeFloat16)
+	} else {
+		u.inTensor, err = ort.NewTensor(shape, u.input)
+	}
+	return err
+}
+
+// run upscales u.input into u.output, detecting the model's scale on the first call.
+func (u *onnxUpscaler) run() error {
+	if !u.half {
+		outputs := []ort.Value{nil}
+		if err := u.session.Run([]ort.Value{u.inTensor}, outputs); err != nil {
+			return fmt.Errorf("inference failed: %v", err)
+		}
+		defer outputs[0].Destroy()
+		out, ok := outputs[0].(*ort.Tensor[float32])
+		if !ok {
+			return fmt.Errorf("model output is not a float32 tensor")
+		}
+		if err := u.checkOutputShape(out.GetShape()); err != nil {
+			return err
+		}
+		u.output = append(u.output[:0], out.GetData()...)
+		return nil
+	}
+
+	for i, v := range u.input {
+		binary.LittleEndian.PutUint16(u.inHalf[2*i:], float32ToFloat16(v))
+	}
+	if u.outHalf == nil {
+		// ONNX Runtime can't hand back float16 outputs it allocates itself, so the output
+		// buffer must be preallocated: try common scales until the model accepts one.
+		var lastErr error
+		for _, scale := range []int{4, 2, 8, 1, 3} {
+			shape := ort.NewShape(1, 3, int64(u.tileH*scale), int64(u.tileW*scale))
+			out, err := ort.NewCustomDataTensor(shape, make([]byte, 2*shape.FlattenedSize()), ort.TensorElementDataTypeFloat16)
+			if err != nil {
+				return err
+			}
+			if lastErr = u.session.Run([]ort.Value{u.inTensor}, []ort.Value{out}); lastErr == nil {
+				u.outHalf, u.scale = out, scale
+				break
+			}
+			out.Destroy()
+		}
+		if u.outHalf == nil {
+			return fmt.Errorf("inference failed: %v", lastErr)
+		}
+	} else if err := u.session.Run([]ort.Value{u.inTensor}, []ort.Value{u.outHalf}); err != nil {
+		return fmt.Errorf("inference failed: %v", err)
+	}
+	data := u.outHalf.GetData()
+	u.output = u.output[:0]
+	for i := 0; i < len(data); i += 2 {
+		u.output = append(u.output, float16ToFloat32(binary.LittleEndian.Uint16(data[i:])))
+	}
+	return nil
+}
+
+func (u *onnxUpscaler) checkOutputShape(shape ort.Shape) error {
+	if len(shape) == 4 && shape[0] == 1 && shape[1] == 3 && shape[2] > 0 && shape[2]%int64(u.tileH) == 0 {
+		scale := int(shape[2]) / u.tileH
+		if shape[3] == int64(u.tileW*scale) && (u.scale == 0 || u.scale == scale) {
+			u.scale = scale
+			return nil
+		}
+	}
+	return fmt.Errorf("unsupported model output shape %v for input [1 3 %d %d]", shape, u.tileH, u.tileW)
+}
+
+func (u *onnxUpscaler) Close() {
+	if u.inTensor != nil {
+		u.inTensor.Destroy()
+	}
+	if u.outHalf != nil {
+		u.outHalf.Destroy()
+	}
+	if u.session != nil {
+		u.session.Destroy()
+	}
+	ort.DestroyEnvironment()
+}
+
+// inspectONNXModel loads the model and runs one tile to check it works and find its scale.
+func inspectONNXModel(modelPath string, mode InferenceMode) (*ModelInfo, error) {
+	u, err := newONNXUpscaler(modelPath, mode)
 	if err != nil {
 		return nil, err
 	}
-	// Tiles always have the same shape; pinning it lets ORT/CoreML plan a static graph.
-	if fixed, err := withStaticInputShape(model, []int64{1, 3, onnxTileSize, onnxTileSize}); err == nil {
-		model = fixed
+	defer u.Close()
+	for i := range u.input {
+		u.input[i] = 0.5
 	}
-	return ort.NewDynamicAdvancedSessionWithONNXData(model, []string{"input"}, []string{"output"}, options)
+	if err := u.run(); err != nil {
+		return nil, err
+	}
+	info := &ModelInfo{
+		Input:      u.inputName,
+		Output:     u.outputName,
+		Precision:  "float32",
+		TileWidth:  u.tileW,
+		TileHeight: u.tileH,
+		FixedSize:  u.fixedSize,
+		Scale:      u.scale,
+	}
+	if u.half {
+		info.Precision = "float16"
+	}
+	return info, nil
 }
 
 // withStaticInputShape rewrites the dynamic dimensions of the model's 4-D graph inputs
@@ -172,12 +354,11 @@ func hasField(msg []byte, num protowire.Number) bool {
 // upscaleWithONNX runs the model over img tile by tile and returns the result at the model's
 // native scale. progress (may be nil) is called with the completed fraction after each tile.
 func upscaleWithONNX(img gocv.Mat, modelPath string, mode InferenceMode, progress func(float64)) (gocv.Mat, error) {
-	session, err := newONNXSession(modelPath, mode)
+	u, err := newONNXUpscaler(modelPath, mode)
 	if err != nil {
 		return gocv.Mat{}, err
 	}
-	defer session.Destroy()
-	defer ort.DestroyEnvironment()
+	defer u.Close()
 
 	width, height := img.Cols(), img.Rows()
 	src, err := img.DataPtrUint8() // BGR, row-major
@@ -185,72 +366,52 @@ func upscaleWithONNX(img gocv.Mat, modelPath string, mode InferenceMode, progres
 		return gocv.Mat{}, err
 	}
 
-	const tile, pad = onnxTileSize, onnxTileOverlap
-	core := tile - 2*pad
-	tilesX, tilesY := (width+core-1)/core, (height+core-1)/core
-
-	input := make([]float32, 3*tile*tile)
-	inputTensor, err := ort.NewTensor(ort.NewShape(1, 3, tile, tile), input)
-	if err != nil {
-		return gocv.Mat{}, err
-	}
-	defer inputTensor.Destroy()
+	tileW, tileH := u.tileW, u.tileH
+	pad := min(onnxTileOverlap, min(tileW, tileH)/8)
+	coreW, coreH := tileW-2*pad, tileH-2*pad
+	tilesX, tilesY := (width+coreW-1)/coreW, (height+coreH-1)/coreH
+	plane := tileW * tileH
 
 	var dst []byte
-	scale := 0
-
 	for ty := 0; ty < tilesY; ty++ {
 		for tx := 0; tx < tilesX; tx++ {
-			x0, y0 := tx*core-pad, ty*core-pad
+			x0, y0 := tx*coreW-pad, ty*coreH-pad
 
 			// Fill the tile as planar RGB, mirroring pixels that fall outside the image.
-			for y := 0; y < tile; y++ {
+			for y := 0; y < tileH; y++ {
 				sy := reflectIndex(y0+y, height)
-				for x := 0; x < tile; x++ {
+				for x := 0; x < tileW; x++ {
 					i := (sy*width + reflectIndex(x0+x, width)) * 3
-					p := y*tile + x
-					input[p] = float32(src[i+2]) / 255
-					input[tile*tile+p] = float32(src[i+1]) / 255
-					input[2*tile*tile+p] = float32(src[i]) / 255
+					p := y*tileW + x
+					u.input[p] = float32(src[i+2]) / 255
+					u.input[plane+p] = float32(src[i+1]) / 255
+					u.input[2*plane+p] = float32(src[i]) / 255
 				}
 			}
 
-			outputs := []ort.Value{nil}
-			if err := session.Run([]ort.Value{inputTensor}, outputs); err != nil {
-				return gocv.Mat{}, fmt.Errorf("inference failed: %v", err)
+			if err := u.run(); err != nil {
+				return gocv.Mat{}, err
 			}
-			outTensor, ok := outputs[0].(*ort.Tensor[float32])
-			if !ok {
-				outputs[0].Destroy()
-				return gocv.Mat{}, fmt.Errorf("model output is not a float32 tensor")
-			}
-			shape := outTensor.GetShape()
-			if len(shape) != 4 || shape[1] != 3 || shape[2] != shape[3] || shape[2]%tile != 0 {
-				outTensor.Destroy()
-				return gocv.Mat{}, fmt.Errorf("unsupported model output shape %v for input [1 3 %d %d]", shape, tile, tile)
-			}
-
+			scale := u.scale
 			if dst == nil {
-				scale = int(shape[2]) / tile
 				dst = make([]byte, width*scale*height*scale*3)
 			}
 
 			// Copy only the tile's core (overlap discarded) into the BGR output image.
-			out := outTensor.GetData()
-			outTile, outWidth := tile*scale, width*scale
-			coreW, coreH := min(core, width-tx*core)*scale, min(core, height-ty*core)*scale
-			for y := 0; y < coreH; y++ {
+			out := u.output
+			outW, outPlane, outWidth := tileW*scale, plane*scale*scale, width*scale
+			cw, ch := min(coreW, width-tx*coreW)*scale, min(coreH, height-ty*coreH)*scale
+			for y := 0; y < ch; y++ {
 				oy := pad*scale + y
-				row := ((ty*core*scale+y)*outWidth + tx*core*scale) * 3
-				for x := 0; x < coreW; x++ {
-					p := oy*outTile + pad*scale + x
+				row := ((ty*coreH*scale+y)*outWidth + tx*coreW*scale) * 3
+				for x := 0; x < cw; x++ {
+					p := oy*outW + pad*scale + x
 					d := row + x*3
-					dst[d] = toByte(out[2*outTile*outTile+p])
-					dst[d+1] = toByte(out[outTile*outTile+p])
+					dst[d] = toByte(out[2*outPlane+p])
+					dst[d+1] = toByte(out[outPlane+p])
 					dst[d+2] = toByte(out[p])
 				}
 			}
-			outTensor.Destroy()
 
 			if progress != nil {
 				progress(float64(ty*tilesX+tx+1) / float64(tilesX*tilesY))
@@ -258,7 +419,7 @@ func upscaleWithONNX(img gocv.Mat, modelPath string, mode InferenceMode, progres
 		}
 	}
 
-	return gocv.NewMatFromBytes(height*scale, width*scale, gocv.MatTypeCV8UC3, dst)
+	return gocv.NewMatFromBytes(height*u.scale, width*u.scale, gocv.MatTypeCV8UC3, dst)
 }
 
 // reflectIndex maps i into [0, n) by mirroring at the edges (OpenCV's BORDER_REFLECT_101).
@@ -274,6 +435,57 @@ func reflectIndex(i, n int) int {
 		}
 	}
 	return i
+}
+
+// float32ToFloat16 converts to IEEE 754 half precision, rounding half away from zero.
+func float32ToFloat16(f float32) uint16 {
+	bits := math.Float32bits(f)
+	sign := uint16(bits>>16) & 0x8000
+	exp := int(bits>>23&0xff) - 127 + 15
+	mant := bits & 0x7fffff
+	switch {
+	case bits&0x7fffffff > 0x7f800000: // NaN
+		return sign | 0x7e00
+	case exp >= 31: // overflow or Inf
+		return sign | 0x7c00
+	case exp <= 0: // subnormal half (or zero)
+		if exp < -10 {
+			return sign
+		}
+		mant |= 0x800000
+		shift := uint(14 - exp)
+		h := uint16(mant >> shift)
+		if mant>>(shift-1)&1 == 1 {
+			h++
+		}
+		return sign | h
+	}
+	h := sign | uint16(exp)<<10 | uint16(mant>>13)
+	if mant&0x1000 != 0 {
+		h++ // a carry into the exponent is still the correctly rounded value
+	}
+	return h
+}
+
+func float16ToFloat32(h uint16) float32 {
+	sign := uint32(h&0x8000) << 16
+	exp := uint32(h>>10) & 0x1f
+	mant := uint32(h & 0x3ff)
+	switch {
+	case exp == 0x1f:
+		return math.Float32frombits(sign | 0x7f800000 | mant<<13)
+	case exp == 0:
+		if mant == 0 {
+			return math.Float32frombits(sign)
+		}
+		e := uint32(127 - 15 + 1)
+		for mant&0x400 == 0 {
+			mant <<= 1
+			e--
+		}
+		return math.Float32frombits(sign | e<<23 | (mant&0x3ff)<<13)
+	}
+	return math.Float32frombits(sign | (exp+127-15)<<23 | mant<<13)
 }
 
 func toByte(v float32) byte {

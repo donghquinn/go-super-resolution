@@ -123,28 +123,53 @@ models with [ONNX Runtime](https://onnxruntime.ai/).
 
 ## Model Files
 
-### Built-in Models
+### Managing Models
 
-The **Model** menu offers two [4x-UltraSharpV2](https://huggingface.co/Kim2091/UltraSharpV2)
-models by Kim2091 (May 2025). They are downloaded on first use: into `models/` in development,
-or the app's user-data folder when packaged. To fetch them ahead of time, run
-`python3 download_model.py`.
+Click **Manage…** next to the Model menu to download, use and delete models. Models are stored
+in `models/` in development, or the app's user-data folder when packaged (**Open Folder**
+shows it). A catalog model you pick in the menu that isn't downloaded yet is fetched when you
+click **Process Image**.
 
-| Model | Architecture | Size | Notes |
-|-------|--------------|------|-------|
-| **UltraSharpV2** | DAT2 transformer | 52 MB | Best quality. Always runs on CPU in `mps` mode (slower with CoreML) |
-| **UltraSharpV2 Lite** | RealPLKSR CNN | 30 MB | ~4x faster on CPU, much faster with CoreML (`mps`) |
+Catalog (every model checked against ONNX Runtime with this backend):
 
-Both are licensed **CC-BY-NC-SA-4.0** (non-commercial use only).
+| Model | Scale | Architecture | Size | License | Best for |
+|-------|-------|--------------|------|---------|----------|
+| **UltraSharpV2** (default) | 4x | DAT2 | 52 MB | CC-BY-NC-SA-4.0 | Best overall quality |
+| **UltraSharpV2 Lite** | 4x | RealPLKSR | 30 MB | CC-BY-NC-SA-4.0 | Fast version of UltraSharpV2 |
+| **RealWebPhoto v4** | 4x | DAT2 | 49 MB | CC-BY-4.0 | Web photos with JPEG artifacts/noise |
+| **Nomos2 RealPLKSR** | 4x | RealPLKSR | 30 MB | CC-BY-4.0 | Fast photo upscaling |
+| **RealPLKSR 2x** | 2x | RealPLKSR | 30 MB | MIT | Native 2x, faithful (non-GAN) |
+| **RealPLKSR 4x** | 4x | RealPLKSR | 30 MB | MIT | Faithful (non-GAN) 4x |
 
-Both models upscale 4x natively. For 2x, 8x, or custom sizes, the 4x result is resized with
-area or cubic interpolation. Images are processed in 256×256 tiles with 32 px overlap, so large
-images don't run out of memory.
+CC-BY-NC-SA models are for non-commercial use only. In `mps` mode, RealPLKSR models run on
+CoreML (5–9x faster than CPU on Apple Silicon). DAT2 models always run on CPU, because they are
+slower with CoreML.
 
-### Custom Models
+`python3 download_model.py` pre-downloads the two UltraSharpV2 models.
 
-Pick **Custom file…** to use any ONNX image-to-image SR model with an `input`/`output` tensor
-(NCHW, RGB, values 0–1). Its scale factor is detected automatically.
+### Adding Your Own Models
+
+Paste a link to any `.onnx` model under **Add a model from a URL**, e.g. from
+[OpenModelDB](https://openmodeldb.info/) or Hugging Face. Hugging Face and GitHub page links
+(`/blob/`) are converted to direct downloads. After downloading, the app checks the model by
+running `sr-backend -inspect`, and removes it again if it can't be used. You can also drop
+`.onnx` files into the models folder yourself.
+
+Supported models take one RGB image in and produce one RGB image out (values 0–1):
+- **precision:** float32 or float16;
+- **input size:** any size, or a fixed one (the fixed size is used as the tile size);
+- **tensor names:** any.
+
+The scale factor is detected automatically. For 2x, 8x or custom sizes, the model's native
+result is resized with area or cubic interpolation. Images are processed in tiles with up to
+32 px overlap, so large images don't run out of memory.
+
+To check a model from the command line:
+
+```bash
+electron/bin/sr-backend -inspect -model path/to/model.onnx
+# {"ok":true,"model":{"input":"input","output":"output","precision":"float16","tileWidth":256,"tileHeight":256,"fixedSize":false,"scale":4}}
+```
 
 ### Model Formats
 
@@ -202,7 +227,9 @@ Pick **Custom file…** to use any ONNX image-to-image SR model with an `input`/
 - `electron/src/main.js` - window, native file dialogs, and IPC; spawns `sr-backend` per job
 - `electron/src/preload.js` - the `window.sr` bridge (context isolation, sandboxed renderer)
 - `electron/src/renderer/` - UI (HTML/CSS/JS)
-- `sr-backend.go` - CLI that processes one image and prints a JSON result line
+- `electron/src/models.js` - model catalog, downloads, URL import
+- `sr-backend.go` - CLI that processes one image (or `-inspect`s a model) and prints a JSON result line
+- `onnx_engine.go` - tiled ONNX Runtime inference (`go test sr-backend.go types.go onnx_engine.go onnx_engine_test.go`)
 
 ### Packaging
 

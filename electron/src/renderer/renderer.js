@@ -14,6 +14,14 @@ const els = {
   modelSelect: $('model-select'),
   customModel: $('custom-model'),
   modelHint: $('model-hint'),
+  manageModels: $('manage-models'),
+  modelsDialog: $('models-dialog'),
+  modelList: $('model-list'),
+  urlForm: $('url-form'),
+  modelUrl: $('model-url'),
+  urlSubmit: $('url-submit'),
+  urlStatus: $('url-status'),
+  modelsDir: $('models-dir'),
   process: $('process'),
   save: $('save'),
   clear: $('clear'),
@@ -25,10 +33,11 @@ const els = {
   progress: $('progress'),
 };
 
-const state = { imagePath: null, resultPath: null, processing: false, models: [] };
+const state = { imagePath: null, resultPath: null, processing: false, models: [], activeModelId: null };
 
 const basename = (p) => p.split(/[\\/]/).pop();
 const setStatus = (text) => { els.status.textContent = text; };
+const errorText = (err) => err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 
 // Cache-bust so re-processing to the same output path shows the new file.
 async function showImage(img, filePath) {
@@ -69,37 +78,177 @@ async function loadImage(filePath) {
   setStatus(`Loaded: ${basename(filePath)} (${w}x${h})`);
 }
 
-// (Re)builds the built-in model options, keeping the current choice (first model on startup).
+// (Re)builds the model menu: downloaded models first, then ones that download on first use.
 async function refreshModels() {
   const firstLoad = state.models.length === 0;
   const selected = els.modelSelect.value;
-  state.models = await window.sr.listModels();
-  for (const opt of [...els.modelSelect.options]) if (opt.value !== 'custom') opt.remove();
-  els.modelSelect.prepend(...state.models.map((m) => new Option(m.label, m.id)));
-  els.modelSelect.value = firstLoad ? state.models[0].id : selected;
+  const { models, dir } = await window.sr.listModels();
+  state.models = models;
+  els.modelsDir.textContent = dir;
+
+  for (const node of [...els.modelSelect.children]) if (node.value !== 'custom') node.remove();
+  const group = (label, items) => {
+    const g = document.createElement('optgroup');
+    g.label = label;
+    g.append(...items.map((m) => new Option(m.source === 'catalog' ? `${m.label} (${m.scale}x)` : m.label, m.id)));
+    return g;
+  };
+  const ready = models.filter((m) => m.downloaded);
+  const available = models.filter((m) => !m.downloaded && m.source === 'catalog');
+  els.modelSelect.prepend(
+    ...(ready.length ? [group('Downloaded', ready)] : []),
+    ...(available.length ? [group('Download on first use', available)] : []),
+  );
+
+  const exists = (id) => models.some((m) => m.id === id && (m.downloaded || m.source === 'catalog'));
+  els.modelSelect.value = !firstLoad && (selected === 'custom' || exists(selected)) ? selected : models[0].id;
   updateModelUI();
+  if (els.modelsDialog.open) renderModelList();
 }
 
-// Built-in models are ONNX, so other engines need a custom model file; opencv needs no model.
+// Managed models are ONNX, so other engines need a custom model file; opencv needs no model.
 function updateModelUI() {
   const onnx = els.engine.value === 'onnx';
   els.modelSection.hidden = els.engine.value === 'opencv';
-  for (const opt of els.modelSelect.options) opt.disabled = !onnx && opt.value !== 'custom';
+  for (const opt of els.modelSelect.querySelectorAll('option')) opt.disabled = !onnx && opt.value !== 'custom';
   if (!onnx) els.modelSelect.value = 'custom';
 
   const model = state.models.find((m) => m.id === els.modelSelect.value);
   els.customModel.hidden = Boolean(model);
-  els.modelHint.textContent = model
-    ? `${model.downloaded ? 'Downloaded' : `Downloads ${model.sizeMB} MB on first use`} · CC-BY-NC-SA-4.0 (non-commercial)`
-    : '';
+  els.modelHint.textContent = model ? modelSummary(model) : '';
 }
 
-function showProgress(info) {
-  els.progress.value = info.fraction;
-  const percent = Math.round(info.fraction * 100);
-  setStatus(info.phase === 'download'
-    ? `Downloading ${info.label} (${info.sizeMB} MB)... ${percent}%`
-    : `Upscaling... ${percent}%`);
+function modelSummary(m) {
+  if (m.source === 'user') {
+    const details = m.scale ? `${m.scale}x · ${m.precision}` : 'not verified';
+    return `${details} · ${m.url ? `from ${new URL(m.url).hostname}` : 'added manually'}`;
+  }
+  const status = m.downloaded ? 'Downloaded' : `Downloads ${m.sizeMB} MB on first use`;
+  return `${m.arch} · ${m.license}${m.license.includes('NC') ? ' (non-commercial)' : ''} · ${status}`;
+}
+
+function button(label, onClick, className) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = label;
+  if (className) b.className = className;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function renderModelList() {
+  els.modelList.replaceChildren(...state.models.map((m) => {
+    const li = document.createElement('li');
+    li.className = 'model-item';
+    li.dataset.id = m.id;
+
+    const info = document.createElement('div');
+    info.className = 'model-info';
+    const title = document.createElement('strong');
+    title.textContent = m.label;
+    const desc = document.createElement('p');
+    desc.className = 'hint';
+    desc.textContent = m.source === 'catalog' ? m.description : 'Added by you';
+    const meta = document.createElement('p');
+    meta.className = 'hint';
+    meta.textContent = m.source === 'catalog'
+      ? `${m.scale}x · ${m.arch} · ${m.sizeMB} MB · ${m.license} · by ${m.author}`
+      : [m.scale && `${m.scale}x`, m.precision, m.sizeMB && `${m.sizeMB} MB`, m.url && new URL(m.url).hostname]
+        .filter(Boolean).join(' · ');
+    info.append(title, desc, meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'model-actions';
+    if (m.downloading) {
+      const bar = document.createElement('progress');
+      if (m.progress != null) bar.value = m.progress;
+      actions.append(bar, button('Cancel', () => window.sr.cancelDownload(m.id)));
+    } else if (m.downloaded) {
+      actions.append(
+        button('Use', () => selectModel(m.id), 'primary'),
+        button('Delete', () => deleteModel(m)),
+      );
+    } else {
+      actions.append(button('Download', () => downloadModel(m.id)));
+    }
+    li.append(info, actions);
+    return li;
+  }));
+}
+
+function selectModel(id) {
+  els.engine.value = 'onnx';
+  els.modelSelect.value = id;
+  updateModelUI();
+  els.modelsDialog.close();
+}
+
+async function downloadModel(id) {
+  const pending = window.sr.downloadModel(id);
+  await refreshModels(); // shows the row as downloading
+  try {
+    await pending;
+  } catch (err) {
+    if (!/canceled/.test(err.message)) els.urlStatus.textContent = `Download failed: ${errorText(err)}`;
+  }
+}
+
+async function deleteModel(m) {
+  if (!window.confirm(`Delete ${m.label}?${m.source === 'catalog' ? ' You can download it again later.' : ''}`)) return;
+  try {
+    await window.sr.deleteModel(m.id);
+  } catch (err) {
+    els.urlStatus.textContent = `Could not delete: ${errorText(err)}`;
+  }
+  await refreshModels();
+}
+
+async function addModelFromUrl(e) {
+  e.preventDefault();
+  const url = els.modelUrl.value;
+  els.urlSubmit.disabled = true;
+  els.urlStatus.textContent = 'Downloading...';
+  try {
+    const pending = window.sr.addModelUrl(url);
+    setTimeout(refreshModels, 300); // show the new row once the download has started
+    const added = await pending;
+    els.modelUrl.value = '';
+    els.urlStatus.textContent = added.scale
+      ? `Added: verified ${added.scale}x ${added.precision} model.`
+      : 'Added.';
+    await refreshModels();
+  } catch (err) {
+    els.urlStatus.textContent = `Could not add model: ${errorText(err)}`;
+    await refreshModels();
+  } finally {
+    els.urlSubmit.disabled = false;
+  }
+}
+
+// Download progress, for both the manager dialog and a download started by Process Image.
+function onModelDownload(event) {
+  if (event.done) {
+    if (event.id.startsWith('file:') && !event.error) els.urlStatus.textContent = 'Verifying model...';
+    refreshModels();
+    return;
+  }
+  const model = state.models.find((m) => m.id === event.id);
+  if (model) model.progress = event.fraction;
+  const bar = els.modelList.querySelector(`[data-id="${CSS.escape(event.id)}"] progress`);
+  if (bar && event.fraction != null) bar.value = event.fraction;
+  if (state.processing && event.id === state.activeModelId) {
+    showProgress(event.fraction, `Downloading ${event.label}...`);
+  }
+}
+
+function showProgress(fraction, label) {
+  if (fraction == null) {
+    els.progress.removeAttribute('value');
+    setStatus(label);
+    return;
+  }
+  els.progress.value = fraction;
+  setStatus(`${label} ${Math.round(fraction * 100)}%`);
 }
 
 async function processImage() {
@@ -116,6 +265,7 @@ async function processImage() {
   setStatus('Processing...');
 
   const modelId = els.engine.value === 'onnx' && els.modelSelect.value !== 'custom' ? els.modelSelect.value : null;
+  state.activeModelId = modelId;
   try {
     const result = await window.sr.process({
       inputPath: state.imagePath,
@@ -134,12 +284,11 @@ async function processImage() {
     const notes = result.notes.length ? ` (${result.notes.join('; ')})` : '';
     setStatus(`Processing completed successfully! Saved to ${basename(result.outputPath)}${notes}`);
   } catch (err) {
-    setStatus(`Processing failed: ${err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`);
+    setStatus(`Processing failed: ${errorText(err)}`);
   } finally {
     state.processing = false;
     els.process.disabled = false;
     els.progress.hidden = true;
-    if (modelId) refreshModels();
   }
 }
 
@@ -197,6 +346,14 @@ document.addEventListener('drop', (e) => {
   if (file) loadImage(window.sr.pathForFile(file));
 });
 
-window.sr.onProgress(showProgress);
+window.sr.onProgress(({ fraction }) => showProgress(fraction, 'Upscaling...'));
+window.sr.onModelDownload(onModelDownload);
+els.manageModels.addEventListener('click', () => {
+  renderModelList();
+  els.modelsDialog.showModal();
+});
+$('close-models').addEventListener('click', () => els.modelsDialog.close());
+$('open-models-folder').addEventListener('click', () => window.sr.openModelsFolder());
+els.urlForm.addEventListener('submit', addModelFromUrl);
 if (window.sr.platform === 'darwin') els.mode.value = 'mps';
 refreshModels();

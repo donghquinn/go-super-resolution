@@ -19,3 +19,4 @@ sr-backend
 electron/node_modules
 electron/bin
 electron/dist
+models/models.json
