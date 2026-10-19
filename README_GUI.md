@@ -41,37 +41,26 @@ A cross-platform GUI application for AI-powered image super-resolution with drag
 
 ## Installation
 
-### Option 1: Download Pre-built Executables
+The desktop app is an **Electron** frontend (`electron/`) that runs a headless Go/OpenCV
+backend (`sr-backend.go` + `types.go`) for each job.
 
-1. Download the appropriate executable for your platform:
-   - **macOS**: `sr-gui-macos`
-   - **Windows**: `sr-gui-windows.exe`
-   - **Linux**: `sr-gui-linux`
-
-2. Run the executable directly
-
-### Option 2: Build from Source
+### Build from Source
 
 1. **Prerequisites**:
    ```bash
-   # Install Go (1.21 or later)
-   # Install OpenCV
-   # macOS: brew install opencv pkg-config
-   # Ubuntu: sudo apt-get install libopencv-dev pkg-config
+   # Go (1.23 or later), Node.js (20 or later)
+   # OpenCV: macOS: brew install opencv pkg-config
+   #         Ubuntu: sudo apt-get install libopencv-dev pkg-config
    ```
 
-2. **Clone and build**:
+2. **Run in development** (builds the Go backend into `electron/bin/` and launches Electron):
    ```bash
-   git clone <repository>
-   cd sr-go
-   go mod tidy
-   go build -o sr-gui sr-gui.go types.go
+   cd electron
+   npm install
+   npm run dev
    ```
 
-3. **Run**:
-   ```bash
-   ./sr-gui
-   ```
+   Set `SR_BACKEND=/path/to/sr-backend` to use a backend binary from somewhere else.
 
 ## Usage
 
@@ -192,29 +181,22 @@ A cross-platform GUI application for AI-powered image super-resolution with drag
 
 ## Development
 
-### Building App Bundles
+### Architecture
+
+- `electron/src/main.js` - window, native file dialogs, and IPC; spawns `sr-backend` per job
+- `electron/src/preload.js` - the `window.sr` bridge (context isolation, sandboxed renderer)
+- `electron/src/renderer/` - UI (HTML/CSS/JS)
+- `sr-backend.go` - CLI that processes one image and prints a JSON result line
+
+### Packaging
 
 ```bash
-# Install fyne tool
-go install fyne.io/fyne/v2/cmd/fyne@latest
-
-# Create app bundle
-fyne package -os darwin -name "Super Resolution" -icon icon.png
-fyne package -os windows -name "Super Resolution" -icon icon.png
-fyne package -os linux -name "Super Resolution" -icon icon.png
+./scripts/build.sh        # or: cd electron && npm run dist
 ```
 
-### Cross-Platform Build
-
-```bash
-# Use the build script
-./build.sh
-
-# Or build manually
-GOOS=windows GOARCH=amd64 go build -o sr-gui-windows.exe sr-gui.go types.go
-GOOS=linux GOARCH=amd64 go build -o sr-gui-linux sr-gui.go types.go
-GOOS=darwin GOARCH=amd64 go build -o sr-gui-macos sr-gui.go types.go
-```
+Packages for the current OS are written to `electron/dist/`. The backend links OpenCV via
+cgo, so build on each target OS. The OpenCV shared libraries must be available on the
+target machine (or bundled alongside `sr-backend`).
 
 ## License
 

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; style-src 'self'; script-src 'self'">
+  <title>Super Resolution - AI Image Upscaler</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <section class="card">
+      <h2>Select Image</h2>
+      <div id="drop-zone" class="drop-zone">
+        <p>Drag and drop an image file here</p>
+        <p class="hint">Supported formats: JPG, PNG, BMP, TIFF</p>
+        <button id="browse-image" type="button">Browse Files</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Settings</h2>
+      <label class="row">Engine
+        <select id="engine">
+          <option value="opencv" selected>opencv</option>
+          <option value="onnx">onnx</option>
+          <option value="tensorflow">tensorflow</option>
+          <option value="tflite">tflite</option>
+        </select>
+      </label>
+      <label class="row">Mode
+        <select id="mode">
+          <option value="cpu" selected>cpu</option>
+          <option value="gpu">gpu</option>
+          <option value="mps">mps</option>
+        </select>
+      </label>
+      <label class="row">Scale
+        <select id="scale">
+          <option value="2">2x</option>
+          <option value="4" selected>4x</option>
+          <option value="8">8x</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      <div id="custom-size" class="row custom" hidden>
+        <label>W <input id="width" type="number" min="0" value="0"></label>
+        <label>H <input id="height" type="number" min="0" value="0"></label>
+      </div>
+      <label class="stack">Model
+        <span class="model-row">
+          <input id="model" type="text" value="models/Real-ESRGAN-x4plus.onnx">
+          <button id="browse-model" type="button">Browse</button>
+        </span>
+      </label>
+    </section>
+
+    <div class="actions">
+      <button id="process" type="button" class="primary">Process Image</button>
+      <button id="save" type="button" disabled>Save Result</button>
+      <button id="clear" type="button">Clear</button>
+    </div>
+  </aside>
+
+  <main class="content">
+    <section class="card comparison">
+      <h2>Image Comparison</h2>
+      <div class="panes">
+        <figure>
+          <figcaption>Original <span id="original-size"></span></figcaption>
+          <div class="frame"><img id="original-img" alt="" hidden><span class="placeholder">No image</span></div>
+        </figure>
+        <figure>
+          <figcaption>Super Resolution <span id="result-size"></span></figcaption>
+          <div class="frame"><img id="result-img" alt="" hidden><span class="placeholder">No result</span></div>
+        </figure>
+      </div>
+    </section>
+    <footer class="status">
+      <span id="status">Ready - Select an image to get started</span>
+      <progress id="progress" hidden></progress>
+    </footer>
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

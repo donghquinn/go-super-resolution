@@ -15,3 +15,7 @@ sr-go
 sr-gui
 
 main
+sr-backend
+electron/node_modules
+electron/bin
+electron/dist

@@ -1,0 +1,39 @@
+{
+  "name": "super-resolution",
+  "productName": "Super Resolution",
+  "version": "1.0.0",
+  "description": "AI image upscaler desktop app (Electron frontend, Go/OpenCV backend)",
+  "main": "src/main.js",
+  "license": "MIT",
+  "scripts": {
+    "build:backend": "cd .. && go build -o electron/bin/sr-backend sr-backend.go types.go",
+    "start": "electron .",
+    "dev": "npm run build:backend && electron .",
+    "dist": "npm run build:backend && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.example.super-resolution",
+    "files": [
+      "src/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "bin/",
+        "to": "bin/"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

@@ -36,9 +36,9 @@ A powerful, cross-platform application for AI-powered image super-resolution wit
 
 ### GUI Application
 
-1. **Run the GUI**:
+1. **Run the GUI** (Electron, see [README_GUI.md](README_GUI.md)):
    ```bash
-   ./sr-gui
+   cd electron && npm install && npm run dev
    ```
 
 2. **Select Image**: Drag & drop or browse for an image file
@@ -48,9 +48,9 @@ A powerful, cross-platform application for AI-powered image super-resolution wit
    - Select hardware mode (CPU/GPU/MPS)
    - Pick scale factor or custom dimensions
 
-4. **Process**: Click "🚀 Process Image" and watch the magic happen!
+4. **Process**: Click "Process Image" and watch the magic happen!
 
-5. **Save**: Export your enhanced image with "💾 Save Result"
+5. **Save**: Export your enhanced image with "Save Result"
 
 ### CLI Tool
 
@@ -148,7 +148,7 @@ The GUI provides an intuitive interface with the following components:
    - **Model**: Browse for AI model file (ONNX/TensorFlow engines)
 
 3. **Process Image**:
-   - Click "🚀 Process Image"
+   - Click "Process Image"
    - Watch real-time progress
    - View enhanced result alongside original
 

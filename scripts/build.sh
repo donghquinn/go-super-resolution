@@ -1,33 +1,17 @@
 #!/bin/bash
+set -e
 
-# Build script for Super Resolution GUI
+# Build script for the Super Resolution desktop app (Electron + Go backend).
+# Requires OpenCV (gocv), Go, and Node.js.
 
-echo "Building Super Resolution GUI..."
+cd "$(dirname "$0")/../electron"
 
-# Build for macOS
-echo "Building for macOS..."
-go build -o sr-gui-macos sr-gui.go types.go
+echo "Installing Electron dependencies..."
+npm install
 
-# Build for Windows (requires CGO for OpenCV)
-echo "Building for Windows..."
-GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -o sr-gui-windows.exe sr-gui.go types.go
+# Builds the Go backend into electron/bin/ and packages the app for the current OS
+# into electron/dist/. The backend links OpenCV via cgo, so build on each target OS.
+echo "Building backend and packaging app..."
+npm run dist
 
-# Build for Linux
-echo "Building for Linux..."
-GOOS=linux GOARCH=amd64 go build -o sr-gui-linux sr-gui.go types.go
-
-echo "Build complete!"
-echo "Executables:"
-echo "  - sr-gui-macos (macOS)"
-echo "  - sr-gui-windows.exe (Windows)"
-echo "  - sr-gui-linux (Linux)"
-
-# Package with fyne
-echo ""
-echo "Creating app bundles..."
-go install fyne.io/fyne/v2/cmd/fyne@latest
-fyne package -os darwin -name "Super Resolution" -icon icon.png
-fyne package -os windows -name "Super Resolution" -icon icon.png
-fyne package -os linux -name "Super Resolution" -icon icon.png
-
-echo "Done!"
+echo "Done! Packages are in electron/dist/"
